@@ -13,11 +13,17 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
+    val ciVersionCode = providers.gradleProperty("versionCode").orNull?.toIntOrNull()
+    val ciVersionName = providers.gradleProperty("versionName").orNull
+    val githubRepo = (System.getenv("GITHUB_REPOSITORY") ?: "").replace("\"", "")
+
     applicationId = "com.aistudio.tindphoto.krmxvp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = ciVersionCode ?: 2
+    versionName = ciVersionName ?: "1.1.0"
+
+    buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

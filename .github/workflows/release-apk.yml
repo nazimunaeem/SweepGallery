@@ -54,6 +54,22 @@ jobs:
             fi
           fi
 
+      - name: Determine release version
+        id: release_tag
+        run: |
+          RUN_NUM="${{ github.run_number }}"
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${{ github.ref_name }}"
+            VER_NAME="${TAG#v}"
+          else
+            TAG="v1.1.${RUN_NUM}"
+            VER_NAME="1.1.${RUN_NUM}"
+          fi
+          VER_CODE=$((100 + RUN_NUM))
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VER_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VER_CODE" >> "$GITHUB_OUTPUT"
+
       - name: Build APK
         id: build_apk
         env:
@@ -61,12 +77,18 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
+          VER_NAME="${{ steps.release_tag.outputs.version_name }}"
+          VER_CODE="${{ steps.release_tag.outputs.version_code }}"
           if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
             echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > my-upload-key.jks
-            gradle assembleRelease --no-daemon --stacktrace -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8"
+            gradle assembleRelease --no-daemon --stacktrace \
+              -PversionName="$VER_NAME" -PversionCode="$VER_CODE" \
+              -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8"
             APK_PATH="app/build/outputs/apk/release/app-release.apk"
           else
-            gradle assembleDebug --no-daemon --stacktrace -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8"
+            gradle assembleDebug --no-daemon --stacktrace \
+              -PversionName="$VER_NAME" -PversionCode="$VER_CODE" \
+              -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8"
             APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
           fi
           if [ ! -f "$APK_PATH" ]; then
@@ -80,15 +102,6 @@ jobs:
         with:
           name: TindPhoto-APK
           path: ${{ steps.build_apk.outputs.apk_path }}
-
-      - name: Determine release tag
-        id: release_tag
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=v1.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

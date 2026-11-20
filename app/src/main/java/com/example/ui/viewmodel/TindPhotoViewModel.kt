@@ -4,11 +4,15 @@ import android.app.Application
 import android.content.IntentSender
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.data.DeleteBatchResult
 import com.example.data.GalleryRepository
+import com.example.data.GitHubReleaseInfo
+import com.example.data.GitHubUpdateChecker
 import com.example.data.PersistedPreferences
 import com.example.data.PreferencesRepository
 import com.example.data.SamplePhotoSeeder
+import com.example.data.UpdateCheckResult
 import com.example.model.AlbumSummary
 import com.example.model.MonthSummary
 import com.example.model.PhotoItem
@@ -21,12 +25,24 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 const val ALBUM_ALL = "All Photos"
 const val MONTH_ALL = "ALL"
+
+sealed interface UpdateUiState {
+    data object Idle : UpdateUiState
+    data object Checking : UpdateUiState
+    data class UpToDate(val latestTag: String?) : UpdateUiState
+    data class Available(
+        val release: GitHubReleaseInfo,
+        val bannerDismissed: Boolean,
+    ) : UpdateUiState
+    data class Error(val message: String) : UpdateUiState
+}
 
 private data class SessionState(
     val hasPermission: Boolean = false,
@@ -44,6 +60,8 @@ private data class SessionState(
     val pendingDeleteSender: IntentSender? = null,
     val pendingDeletePhotos: List<PhotoItem> = emptyList(),
     val snackbarMessage: String? = null,
+    val updateStatus: UpdateUiState = UpdateUiState.Idle,
+    val showUpdateDialog: Boolean = false,
 )
 
 data class TindPhotoUiState(
@@ -69,6 +87,11 @@ data class TindPhotoUiState(
     val lightboxPhoto: PhotoItem? = null,
     val pendingDeleteSender: IntentSender? = null,
     val snackbarMessage: String? = null,
+    val currentVersionName: String = BuildConfig.VERSION_NAME,
+    val currentVersionCode: Int = BuildConfig.VERSION_CODE,
+    val githubRepo: String = BuildConfig.GITHUB_REPO,
+    val updateStatus: UpdateUiState = UpdateUiState.Idle,
+    val showUpdateDialog: Boolean = false,
 )
 
 class TindPhotoViewModel(application: Application) : AndroidViewModel(application) {
@@ -89,6 +112,16 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = TindPhotoUiState(),
     )
+
+    init {
+        viewModelScope.launch {
+            val prefs = preferencesRepository.preferencesFlow.first()
+            val repo = prefs.customGithubRepo.ifBlank { BuildConfig.GITHUB_REPO }
+            if (repo.isNotBlank()) {
+                checkForUpdatesInternal(repo = repo, silent = true)
+            }
+        }
+    }
 
     private fun buildUiState(
         session: SessionState,
@@ -203,6 +236,14 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
                 }
         }
 
+        val effectiveRepo = prefs.customGithubRepo.ifBlank { BuildConfig.GITHUB_REPO }
+        val resolvedUpdateStatus = when (val raw = session.updateStatus) {
+            is UpdateUiState.Available -> raw.copy(
+                bannerDismissed = prefs.dismissedUpdateTag == raw.release.tagName,
+            )
+            else -> raw
+        }
+
         return TindPhotoUiState(
             hasPermission = session.hasPermission,
             isLoading = session.isLoading,
@@ -226,6 +267,11 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
             lightboxPhoto = session.lightboxPhoto,
             pendingDeleteSender = session.pendingDeleteSender,
             snackbarMessage = session.snackbarMessage,
+            currentVersionName = BuildConfig.VERSION_NAME,
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            githubRepo = effectiveRepo,
+            updateStatus = resolvedUpdateStatus,
+            showUpdateDialog = session.showUpdateDialog,
         )
     }
 
@@ -481,5 +527,95 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun clearSnackbar() {
         sessionState.update { it.copy(snackbarMessage = null) }
+    }
+
+    fun checkForUpdates() {
+        viewModelScope.launch {
+            val prefs = preferencesRepository.preferencesFlow.first()
+            val repo = prefs.customGithubRepo.ifBlank { BuildConfig.GITHUB_REPO }
+            checkForUpdatesInternal(repo = repo, silent = false)
+        }
+    }
+
+    fun saveGithubRepo(rawInput: String) {
+        viewModelScope.launch {
+            val normalized = GitHubUpdateChecker.normalizeRepoSlug(rawInput)
+            if (rawInput.isNotBlank() && normalized.isEmpty()) {
+                sessionState.update {
+                    it.copy(snackbarMessage = "Use owner/repo format (e.g. user/TindPhoto)")
+                }
+                return@launch
+            }
+            preferencesRepository.setCustomGithubRepo(normalized)
+            if (normalized.isNotBlank()) {
+                checkForUpdatesInternal(repo = normalized, silent = false)
+            } else {
+                sessionState.update { it.copy(updateStatus = UpdateUiState.Idle) }
+            }
+        }
+    }
+
+    fun dismissUpdateBanner() {
+        val currentStatus = uiState.value.updateStatus
+        if (currentStatus is UpdateUiState.Available) {
+            viewModelScope.launch {
+                preferencesRepository.setDismissedUpdateTag(currentStatus.release.tagName)
+            }
+        }
+    }
+
+    fun setShowUpdateDialog(show: Boolean) {
+        sessionState.update { it.copy(showUpdateDialog = show) }
+    }
+
+    private suspend fun checkForUpdatesInternal(repo: String, silent: Boolean) {
+        if (repo.isBlank()) {
+            if (!silent) {
+                sessionState.update {
+                    it.copy(updateStatus = UpdateUiState.Error("Set a GitHub repo (owner/repo) first"))
+                }
+            }
+            return
+        }
+        sessionState.update { it.copy(updateStatus = UpdateUiState.Checking) }
+        when (
+            val result = GitHubUpdateChecker.checkLatestRelease(
+                repoInput = repo,
+                currentVersionName = BuildConfig.VERSION_NAME,
+            )
+        ) {
+            is UpdateCheckResult.UpdateAvailable -> {
+                sessionState.update {
+                    it.copy(
+                        updateStatus = UpdateUiState.Available(
+                            release = result.release,
+                            bannerDismissed = false,
+                        ),
+                    )
+                }
+            }
+            is UpdateCheckResult.UpToDate -> {
+                sessionState.update {
+                    it.copy(
+                        updateStatus = if (silent) {
+                            UpdateUiState.Idle
+                        } else {
+                            UpdateUiState.UpToDate(result.latestTag)
+                        },
+                    )
+                }
+            }
+            is UpdateCheckResult.Error -> {
+                sessionState.update {
+                    it.copy(
+                        updateStatus = if (silent) {
+                            UpdateUiState.Idle
+                        } else {
+                            UpdateUiState.Error(result.message)
+                        },
+                    )
+                }
+            }
+        }
     }
 }

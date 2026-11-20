@@ -11,24 +11,41 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.outlined.AutoAwesomeMosaic
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material.icons.rounded.AutoAwesomeMosaic
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Style
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -39,18 +56,23 @@ import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -71,8 +93,10 @@ import com.example.ui.screens.StudioStatsScreen
 import com.example.ui.screens.SwipeDeckScreen
 import com.example.ui.screens.TrashBinScreen
 import com.example.ui.theme.FlameCoral
+import com.example.ui.theme.KeepEmerald
 import com.example.ui.theme.TindPhotoTheme
 import com.example.ui.viewmodel.TindPhotoViewModel
+import com.example.ui.viewmodel.UpdateUiState
 
 const val ROUTE_SWIPE = "swipe"
 const val ROUTE_TRASH = "trash"
@@ -233,58 +257,125 @@ fun TindPhotoApp(
                                 )
                             }
 
-                            NavHost(
-                                navController = navController,
-                                startDestination = ROUTE_SWIPE,
+                            Column(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight(),
                             ) {
-                                composable(ROUTE_SWIPE) {
-                                    SwipeDeckScreen(
-                                        state = state,
-                                        onSwipe = viewModel::swipePhoto,
-                                        onUndo = viewModel::undoLastSwipe,
-                                        onInspectPhoto = viewModel::openInspector,
-                                        onOpenLightbox = viewModel::openLightbox,
-                                        onSelectAlbum = viewModel::selectAlbum,
-                                        onSelectMonth = viewModel::selectMonth,
-                                        onSelectSortOrder = viewModel::setSortOrder,
-                                        onRefresh = viewModel::refreshGallery,
-                                        onSeedSamples = viewModel::seedSamplePhotos,
-                                        onIncludeReviewed = { viewModel.setIncludeReviewed(true) },
-                                        onOpenTrashTab = { navigateToTab(ROUTE_TRASH) },
-                                    )
+                                val updateStatus = state.updateStatus
+                                if (updateStatus is UpdateUiState.Available && !updateStatus.bannerDismissed) {
+                                    Surface(
+                                        onClick = { viewModel.setShowUpdateDialog(true) },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                            .testTag("update_available_banner"),
+                                        shape = MaterialTheme.shapes.medium,
+                                        color = KeepEmerald.copy(alpha = 0.14f),
+                                        border = BorderStroke(1.dp, KeepEmerald.copy(alpha = 0.5f)),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.weight(1f),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.SystemUpdate,
+                                                    contentDescription = null,
+                                                    tint = KeepEmerald,
+                                                    modifier = Modifier.size(18.dp),
+                                                )
+                                                Text(
+                                                    text = "New release ${updateStatus.release.tagName} available",
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    color = KeepEmerald,
+                                                )
+                                            }
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                TextButton(
+                                                    onClick = { viewModel.setShowUpdateDialog(true) },
+                                                ) {
+                                                    Text("Update", color = KeepEmerald, fontWeight = FontWeight.Bold)
+                                                }
+                                                IconButton(
+                                                    onClick = viewModel::dismissUpdateBanner,
+                                                    modifier = Modifier.size(36.dp),
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.Close,
+                                                        contentDescription = "Dismiss update banner",
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(16.dp),
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
 
-                                composable(ROUTE_TRASH) {
-                                    TrashBinScreen(
-                                        state = state,
-                                        onRestorePhoto = viewModel::restoreFromTrash,
-                                        onRestoreAll = viewModel::restoreAllFromTrash,
-                                        onInspectPhoto = viewModel::openLightbox,
-                                        onDeleteAllConfirmed = viewModel::requestBatchDelete,
-                                        onGoToSwipe = { navigateToTab(ROUTE_SWIPE) },
-                                    )
-                                }
+                                NavHost(
+                                    navController = navController,
+                                    startDestination = ROUTE_SWIPE,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth(),
+                                ) {
+                                    composable(ROUTE_SWIPE) {
+                                        SwipeDeckScreen(
+                                            state = state,
+                                            onSwipe = viewModel::swipePhoto,
+                                            onUndo = viewModel::undoLastSwipe,
+                                            onInspectPhoto = viewModel::openInspector,
+                                            onOpenLightbox = viewModel::openLightbox,
+                                            onSelectAlbum = viewModel::selectAlbum,
+                                            onSelectMonth = viewModel::selectMonth,
+                                            onSelectSortOrder = viewModel::setSortOrder,
+                                            onRefresh = viewModel::refreshGallery,
+                                            onSeedSamples = viewModel::seedSamplePhotos,
+                                            onIncludeReviewed = { viewModel.setIncludeReviewed(true) },
+                                            onOpenTrashTab = { navigateToTab(ROUTE_TRASH) },
+                                        )
+                                    }
 
-                                composable(ROUTE_STATS) {
-                                    StudioStatsScreen(
-                                        state = state,
-                                        onSelectAlbumAndSwipe = { album ->
-                                            viewModel.selectAlbum(album)
-                                            navigateToTab(ROUTE_SWIPE)
-                                        },
-                                        onSelectMonthAndSwipe = { monthKey ->
-                                            viewModel.selectMonth(monthKey)
-                                            navigateToTab(ROUTE_SWIPE)
-                                        },
-                                        onSetSortOrder = viewModel::setSortOrder,
-                                        onSetIncludeReviewed = viewModel::setIncludeReviewed,
-                                        onSetDarkMode = viewModel::setDarkMode,
-                                        onResetKeptHistory = viewModel::resetKeptHistory,
-                                        onSeedSamples = viewModel::seedSamplePhotos,
-                                    )
+                                    composable(ROUTE_TRASH) {
+                                        TrashBinScreen(
+                                            state = state,
+                                            onRestorePhoto = viewModel::restoreFromTrash,
+                                            onRestoreAll = viewModel::restoreAllFromTrash,
+                                            onInspectPhoto = viewModel::openLightbox,
+                                            onDeleteAllConfirmed = viewModel::requestBatchDelete,
+                                            onGoToSwipe = { navigateToTab(ROUTE_SWIPE) },
+                                        )
+                                    }
+
+                                    composable(ROUTE_STATS) {
+                                        StudioStatsScreen(
+                                            state = state,
+                                            onSelectAlbumAndSwipe = { album ->
+                                                viewModel.selectAlbum(album)
+                                                navigateToTab(ROUTE_SWIPE)
+                                            },
+                                            onSelectMonthAndSwipe = { monthKey ->
+                                                viewModel.selectMonth(monthKey)
+                                                navigateToTab(ROUTE_SWIPE)
+                                            },
+                                            onSetSortOrder = viewModel::setSortOrder,
+                                            onSetIncludeReviewed = viewModel::setIncludeReviewed,
+                                            onSetDarkMode = viewModel::setDarkMode,
+                                            onResetKeptHistory = viewModel::resetKeptHistory,
+                                            onSeedSamples = viewModel::seedSamplePhotos,
+                                            onCheckForUpdates = viewModel::checkForUpdates,
+                                            onSaveGithubRepo = viewModel::saveGithubRepo,
+                                            onOpenUpdateDialog = { viewModel.setShowUpdateDialog(true) },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -308,6 +399,66 @@ fun TindPhotoApp(
                 onKeep = { photo -> viewModel.swipePhoto(photo, SwipeDirection.RIGHT_KEEP) },
                 onTrash = { photo -> viewModel.swipePhoto(photo, SwipeDirection.LEFT_TRASH) },
             )
+
+            // GitHub Release Update Dialog
+            val updateStatus = state.updateStatus
+            if (state.showUpdateDialog && updateStatus is UpdateUiState.Available) {
+                val release = updateStatus.release
+                AlertDialog(
+                    onDismissRequest = { viewModel.setShowUpdateDialog(false) },
+                    title = { Text("Update Available: ${release.tagName}") },
+                    text = {
+                        Column(
+                            modifier = Modifier.verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = "Current: v${state.currentVersionName} → Latest: ${release.tagName}",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = KeepEmerald,
+                            )
+                            if (release.notes.isNotBlank()) {
+                                Text(
+                                    text = release.notes,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                Text(
+                                    text = "A newer build of TindPhoto is published on GitHub Releases.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                viewModel.setShowUpdateDialog(false)
+                                val targetUrl = release.apkDownloadUrl ?: release.htmlUrl
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
+                                context.startActivity(intent)
+                            },
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = KeepEmerald,
+                                contentColor = Color(0xFF042619),
+                            ),
+                            modifier = Modifier.testTag("open_github_release_button"),
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Download on GitHub")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { viewModel.setShowUpdateDialog(false) }) {
+                            Text("Later")
+                        }
+                    },
+                )
+            }
         }
     }
 }

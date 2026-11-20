@@ -25,14 +25,23 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -41,6 +50,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +73,7 @@ import com.example.ui.theme.KeepEmerald
 import com.example.ui.theme.TrashCrimson
 import com.example.ui.viewmodel.MONTH_ALL
 import com.example.ui.viewmodel.TindPhotoUiState
+import com.example.ui.viewmodel.UpdateUiState
 
 @Composable
 fun StudioStatsScreen(
@@ -71,6 +85,9 @@ fun StudioStatsScreen(
     onSetDarkMode: (Boolean) -> Unit,
     onResetKeptHistory: () -> Unit,
     onSeedSamples: () -> Unit,
+    onCheckForUpdates: () -> Unit,
+    onSaveGithubRepo: (String) -> Unit,
+    onOpenUpdateDialog: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val specificMonths = state.months.filter { it.key != MONTH_ALL }
@@ -118,6 +135,19 @@ fun StudioStatsScreen(
                 onSetDarkMode = onSetDarkMode,
                 onResetKeptHistory = onResetKeptHistory,
                 onSeedSamples = onSeedSamples,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 680.dp),
+            )
+        }
+
+        // GitHub App Updates Card
+        item {
+            AppUpdatesCard(
+                state = state,
+                onCheckForUpdates = onCheckForUpdates,
+                onSaveGithubRepo = onSaveGithubRepo,
+                onOpenUpdateDialog = onOpenUpdateDialog,
                 modifier = Modifier
                     .fillMaxWidth()
                     .widthIn(max = 680.dp),
@@ -625,5 +655,195 @@ private fun AlbumRowCard(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+@Composable
+private fun AppUpdatesCard(
+    state: TindPhotoUiState,
+    onCheckForUpdates: () -> Unit,
+    onSaveGithubRepo: (String) -> Unit,
+    onOpenUpdateDialog: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var showRepoDialog by remember { mutableStateOf(false) }
+
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.SystemUpdate,
+                        contentDescription = null,
+                        tint = FlameCoral,
+                    )
+                    Column {
+                        Text(
+                            text = "App Updates",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            text = "Installed: v${state.currentVersionName} (${state.currentVersionCode})",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = { showRepoDialog = true },
+                    modifier = Modifier.testTag("edit_github_repo_button"),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Edit,
+                        contentDescription = "Configure GitHub repository",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Text(
+                text = if (state.githubRepo.isNotBlank()) {
+                    "GitHub: ${state.githubRepo}"
+                } else {
+                    "GitHub repo not set — tap edit to enter owner/repo"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            when (val status = state.updateStatus) {
+                is UpdateUiState.Available -> {
+                    Button(
+                        onClick = onOpenUpdateDialog,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("view_available_update_button"),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = KeepEmerald,
+                            contentColor = Color(0xFF042619),
+                        ),
+                    ) {
+                        Text("Update Available: ${status.release.tagName}")
+                    }
+                }
+                is UpdateUiState.Checking -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = FlameCoral,
+                        )
+                        Text(
+                            text = "Checking GitHub Releases…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                is UpdateUiState.UpToDate -> {
+                    Text(
+                        text = if (status.latestTag != null) {
+                            "You are on the latest version (${status.latestTag})"
+                        } else {
+                            "No releases published yet on GitHub"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = KeepEmerald,
+                    )
+                }
+                is UpdateUiState.Error -> {
+                    Text(
+                        text = status.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TrashCrimson,
+                    )
+                }
+                UpdateUiState.Idle -> Unit
+            }
+
+            OutlinedButton(
+                onClick = {
+                    if (state.githubRepo.isBlank()) {
+                        showRepoDialog = true
+                    } else {
+                        onCheckForUpdates()
+                    }
+                },
+                enabled = state.updateStatus !is UpdateUiState.Checking,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp)
+                    .testTag("check_updates_button"),
+                shape = CircleShape,
+            ) {
+                Text(
+                    if (state.githubRepo.isBlank()) "Set GitHub Repository" else "Check for Updates",
+                )
+            }
+        }
+    }
+
+    if (showRepoDialog) {
+        var repoDraft by remember(state.githubRepo) { mutableStateOf(state.githubRepo) }
+        AlertDialog(
+            onDismissRequest = { showRepoDialog = false },
+            title = { Text("GitHub Repository") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Enter your GitHub repository (owner/repo) to check for new APK releases.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = repoDraft,
+                        onValueChange = { repoDraft = it },
+                        singleLine = true,
+                        label = { Text("owner/repo") },
+                        placeholder = { Text("username/TindPhoto") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("github_repo_input"),
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showRepoDialog = false
+                        onSaveGithubRepo(repoDraft)
+                    },
+                    modifier = Modifier.testTag("save_github_repo_button"),
+                ) {
+                    Text("Save & Check")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRepoDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
