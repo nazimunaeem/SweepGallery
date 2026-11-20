@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">TindPhoto</string>
+    <string name="nav_swipe">Swipe</string>
+    <string name="nav_trash">Trash</string>
+    <string name="nav_stats">Studio</string>
+    <string name="permission_title">Ready to declutter your gallery?</string>
+    <string name="permission_body">TindPhoto stays 100% on your device. Grant photo access to swipe right to keep memories or swipe left to queue clutter for deletion.</string>
+    <string name="grant_access">Grant Photo Access</string>
+    <string name="open_settings">Open Settings</string>
+    <string name="stamp_keep">KEEP</string>
+    <string name="stamp_trash">DELETE</string>
+    <string name="empty_deck_title">All caught up</string>
+    <string name="empty_deck_subtitle">You have reviewed every photo in this filter.</string>
+    <string name="empty_gallery_title">No photos found on device</string>
+    <string name="empty_gallery_subtitle">Your gallery is empty or filtered out. You can add sample photos to test swiping and deletion right away.</string>
+    <string name="add_sample_photos">Add Sample Photos</string>
+    <string name="review_kept_again">Review Kept Photos Again</string>
+    <string name="switch_to_all_photos">Show All Albums</string>
+    <string name="trash_empty_title">Trash queue is empty</string>
+    <string name="trash_empty_subtitle">Swipe left on photos in the Swipe tab to queue them here before permanent deletion.</string>
+    <string name="delete_permanently">Delete Permanently</string>
+    <string name="restore_all">Restore All</string>
+    <string name="cd_undo">Undo last swipe</string>
+    <string name="cd_trash">Swipe left to delete</string>
+    <string name="cd_keep">Swipe right to keep</string>
+    <string name="cd_inspect">Inspect photo details</string>
+    <string name="cd_zoom">View full screen photo</string>
+    <string name="cd_restore_photo">Restore photo from trash</string>
+    <string name="cd_close_lightbox">Close full screen preview</string>
+</resources>
