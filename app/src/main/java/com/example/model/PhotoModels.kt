@@ -27,6 +27,12 @@ data class PhotoItem(
     val formattedDate: String
         get() = formatPhotoDate(effectiveDateMillis)
 
+    val monthKey: String
+        get() = formatMonthKey(effectiveDateMillis)
+
+    val monthLabel: String
+        get() = formatMonthLabel(effectiveDateMillis)
+
     val resolutionLabel: String
         get() = if (width > 0 && height > 0) "${width} × ${height}" else "Unknown"
 }
@@ -59,6 +65,15 @@ data class AlbumSummary(
     val totalBytes: Long,
 )
 
+data class MonthSummary(
+    val key: String,
+    val label: String,
+    val totalCount: Int,
+    val remainingCount: Int,
+    val totalBytes: Long,
+    val isCompleted: Boolean,
+)
+
 fun formatFileSize(bytes: Long): String {
     if (bytes <= 0L) return "0 B"
     val units = arrayOf("B", "KB", "MB", "GB")
@@ -74,5 +89,17 @@ fun formatFileSize(bytes: Long): String {
 fun formatPhotoDate(millis: Long): String {
     if (millis <= 0L) return "Unknown date"
     val formatter = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+    return formatter.format(Date(millis))
+}
+
+fun formatMonthKey(millis: Long): String {
+    if (millis <= 0L) return "0000-00"
+    val formatter = SimpleDateFormat("yyyy-MM", Locale.US)
+    return formatter.format(Date(millis))
+}
+
+fun formatMonthLabel(millis: Long): String {
+    if (millis <= 0L) return "Unknown"
+    val formatter = SimpleDateFormat("MMM yyyy", Locale.getDefault())
     return formatter.format(Date(millis))
 }

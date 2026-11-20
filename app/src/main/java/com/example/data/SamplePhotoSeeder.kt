@@ -15,6 +15,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.Calendar
 
 /**
  * Generates real JPEG sample photos directly into MediaStore (Pictures/TindPhotoSamples)
@@ -29,6 +30,7 @@ class SamplePhotoSeeder(private val context: Context) {
         val bottomColor: Int,
         val accentColor: Int,
         val style: Int,
+        val monthsAgo: Int,
     )
 
     suspend fun seedSamplePhotos(): Int = withContext(Dispatchers.IO) {
@@ -39,6 +41,7 @@ class SamplePhotoSeeder(private val context: Context) {
                 bottomColor = Color.rgb(255, 102, 82),
                 accentColor = Color.rgb(255, 206, 107),
                 style = 0,
+                monthsAgo = 0,
             ),
             SampleSpec(
                 fileName = "IMG_Alpine_Morning.jpg",
@@ -46,6 +49,7 @@ class SamplePhotoSeeder(private val context: Context) {
                 bottomColor = Color.rgb(164, 214, 232),
                 accentColor = Color.rgb(245, 248, 255),
                 style = 1,
+                monthsAgo = 0,
             ),
             SampleSpec(
                 fileName = "IMG_Neon_Night.jpg",
@@ -53,6 +57,7 @@ class SamplePhotoSeeder(private val context: Context) {
                 bottomColor = Color.rgb(54, 18, 72),
                 accentColor = Color.rgb(16, 214, 142),
                 style = 2,
+                monthsAgo = 1,
             ),
             SampleSpec(
                 fileName = "Screenshot_Receipt_Old.jpg",
@@ -60,6 +65,7 @@ class SamplePhotoSeeder(private val context: Context) {
                 bottomColor = Color.rgb(212, 208, 198),
                 accentColor = Color.rgb(90, 92, 102),
                 style = 3,
+                monthsAgo = 1,
             ),
             SampleSpec(
                 fileName = "IMG_Desert_Dunes.jpg",
@@ -67,6 +73,7 @@ class SamplePhotoSeeder(private val context: Context) {
                 bottomColor = Color.rgb(168, 66, 44),
                 accentColor = Color.rgb(255, 232, 190),
                 style = 4,
+                monthsAgo = 2,
             ),
             SampleSpec(
                 fileName = "IMG_Pocket_Blur_Test.jpg",
@@ -74,17 +81,24 @@ class SamplePhotoSeeder(private val context: Context) {
                 bottomColor = Color.rgb(22, 20, 24),
                 accentColor = Color.rgb(255, 77, 103),
                 style = 5,
+                monthsAgo = 2,
             ),
         )
 
         var inserted = 0
-        for (spec in specs) {
+        for ((index, spec) in specs.withIndex()) {
             val bitmap = renderSampleBitmap(spec)
+            val dateTaken = Calendar.getInstance().apply {
+                add(Calendar.MONTH, -spec.monthsAgo)
+                add(Calendar.DAY_OF_MONTH, -(index % 5))
+            }.timeInMillis
+
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, spec.fileName)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
                 put(MediaStore.Images.Media.WIDTH, bitmap.width)
                 put(MediaStore.Images.Media.HEIGHT, bitmap.height)
+                put(MediaStore.Images.Media.DATE_TAKEN, dateTaken)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     put(
                         MediaStore.Images.Media.RELATIVE_PATH,

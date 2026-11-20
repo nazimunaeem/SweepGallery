@@ -10,6 +10,7 @@ import com.example.data.PersistedPreferences
 import com.example.data.PreferencesRepository
 import com.example.data.SamplePhotoSeeder
 import com.example.model.AlbumSummary
+import com.example.model.MonthSummary
 import com.example.model.PhotoItem
 import com.example.model.SortOrder
 import com.example.model.SwipeDirection
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 const val ALBUM_ALL = "All Photos"
+const val MONTH_ALL = "ALL"
 
 private data class SessionState(
     val hasPermission: Boolean = false,
@@ -36,6 +38,7 @@ private data class SessionState(
     val sessionKeptIds: Set<Long> = emptySet(),
     val undoStack: List<SwipeRecord> = emptyList(),
     val selectedAlbum: String = ALBUM_ALL,
+    val selectedMonth: String = MONTH_ALL,
     val inspectingPhoto: PhotoItem? = null,
     val lightboxPhoto: PhotoItem? = null,
     val pendingDeleteSender: IntentSender? = null,
@@ -55,6 +58,9 @@ data class TindPhotoUiState(
     val canUndo: Boolean = false,
     val selectedAlbum: String = ALBUM_ALL,
     val albums: List<AlbumSummary> = emptyList(),
+    val selectedMonth: String = MONTH_ALL,
+    val months: List<MonthSummary> = emptyList(),
+    val nextUnfinishedMonth: MonthSummary? = null,
     val sortOrder: SortOrder = SortOrder.NEWEST,
     val includeReviewed: Boolean = false,
     val darkMode: Boolean = true,
@@ -92,7 +98,13 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
         val trashSet = session.trashQueueIds.toSet()
         val trashPhotos = session.trashQueueIds.mapNotNull { photosById[it] }
 
-        val excludedIds = buildSet {
+        val reviewedIds = buildSet {
+            addAll(trashSet)
+            addAll(session.sessionKeptIds)
+            addAll(prefs.keptPhotoIds)
+        }
+
+        val excludedFromDeckIds = buildSet {
             addAll(trashSet)
             addAll(session.sessionKeptIds)
             if (!prefs.includeReviewed) {
@@ -106,13 +118,67 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
             session.allPhotos.filter { it.albumName == session.selectedAlbum }
         }
 
-        val sortedFiltered = when (prefs.sortOrder) {
-            SortOrder.NEWEST -> albumFiltered.sortedByDescending { it.effectiveDateMillis }
-            SortOrder.OLDEST -> albumFiltered.sortedBy { it.effectiveDateMillis }
-            SortOrder.LARGEST -> albumFiltered.sortedByDescending { it.sizeBytes }
+        // Build month summaries from the active album selection
+        val monthSummaries = buildList {
+            if (albumFiltered.isNotEmpty()) {
+                val allRemaining = albumFiltered.count { it.id !in reviewedIds }
+                add(
+                    MonthSummary(
+                        key = MONTH_ALL,
+                        label = "All Months",
+                        totalCount = albumFiltered.size,
+                        remainingCount = allRemaining,
+                        totalBytes = albumFiltered.sumOf { it.sizeBytes },
+                        isCompleted = allRemaining == 0,
+                    ),
+                )
+            }
+
+            albumFiltered
+                .groupBy { it.monthKey }
+                .entries
+                .sortedByDescending { it.key }
+                .forEach { (monthKey, items) ->
+                    val remaining = items.count { it.id !in reviewedIds }
+                    add(
+                        MonthSummary(
+                            key = monthKey,
+                            label = items.first().monthLabel,
+                            totalCount = items.size,
+                            remainingCount = remaining,
+                            totalBytes = items.sumOf { it.sizeBytes },
+                            isCompleted = items.isNotEmpty() && remaining == 0,
+                        ),
+                    )
+                }
         }
 
-        val deckPhotos = sortedFiltered.filter { it.id !in excludedIds }
+        val effectiveSelectedMonth = if (
+            session.selectedMonth == MONTH_ALL ||
+            monthSummaries.any { it.key == session.selectedMonth }
+        ) {
+            session.selectedMonth
+        } else {
+            MONTH_ALL
+        }
+
+        val monthFiltered = if (effectiveSelectedMonth == MONTH_ALL) {
+            albumFiltered
+        } else {
+            albumFiltered.filter { it.monthKey == effectiveSelectedMonth }
+        }
+
+        val sortedFiltered = when (prefs.sortOrder) {
+            SortOrder.NEWEST -> monthFiltered.sortedByDescending { it.effectiveDateMillis }
+            SortOrder.OLDEST -> monthFiltered.sortedBy { it.effectiveDateMillis }
+            SortOrder.LARGEST -> monthFiltered.sortedByDescending { it.sizeBytes }
+        }
+
+        val deckPhotos = sortedFiltered.filter { it.id !in excludedFromDeckIds }
+
+        val nextUnfinishedMonth = monthSummaries.firstOrNull {
+            it.key != MONTH_ALL && it.key != effectiveSelectedMonth && !it.isCompleted
+        }
 
         val albumSummaries = buildList {
             add(
@@ -149,6 +215,9 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
             canUndo = session.undoStack.isNotEmpty(),
             selectedAlbum = session.selectedAlbum,
             albums = albumSummaries,
+            selectedMonth = effectiveSelectedMonth,
+            months = monthSummaries,
+            nextUnfinishedMonth = nextUnfinishedMonth,
             sortOrder = prefs.sortOrder,
             includeReviewed = prefs.includeReviewed,
             darkMode = prefs.darkMode,
@@ -194,7 +263,7 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
                     isSeeding = false,
                     allPhotos = loaded,
                     snackbarMessage = if (count > 0) {
-                        "Added $count sample photos to your gallery"
+                        "Added $count sample photos across 3 months"
                     } else {
                         "Could not add sample photos"
                     },
@@ -254,6 +323,14 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
                         lastRecord.photo.albumName
                     } else {
                         current.selectedAlbum
+                    },
+                    selectedMonth = if (
+                        current.selectedMonth != MONTH_ALL &&
+                        current.selectedMonth != lastRecord.photo.monthKey
+                    ) {
+                        lastRecord.photo.monthKey
+                    } else {
+                        current.selectedMonth
                     },
                 )
             }
@@ -355,6 +432,10 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun selectAlbum(album: String) {
         sessionState.update { it.copy(selectedAlbum = album) }
+    }
+
+    fun selectMonth(monthKey: String) {
+        sessionState.update { it.copy(selectedMonth = monthKey) }
     }
 
     fun setSortOrder(sortOrder: SortOrder) {

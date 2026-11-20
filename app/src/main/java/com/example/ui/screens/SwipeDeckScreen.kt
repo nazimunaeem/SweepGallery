@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -31,9 +32,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SwapVert
@@ -67,6 +71,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -83,6 +88,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.R
+import com.example.model.MonthSummary
 import com.example.model.PhotoItem
 import com.example.model.SortOrder
 import com.example.model.SwipeDirection
@@ -94,6 +100,7 @@ import com.example.ui.theme.KeepEmerald
 import com.example.ui.theme.TrashCrimson
 import com.example.ui.theme.UndoAmber
 import com.example.ui.viewmodel.ALBUM_ALL
+import com.example.ui.viewmodel.MONTH_ALL
 import com.example.ui.viewmodel.TindPhotoUiState
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -106,6 +113,7 @@ fun SwipeDeckScreen(
     onInspectPhoto: (PhotoItem) -> Unit,
     onOpenLightbox: (PhotoItem) -> Unit,
     onSelectAlbum: (String) -> Unit,
+    onSelectMonth: (String) -> Unit,
     onSelectSortOrder: (SortOrder) -> Unit,
     onRefresh: () -> Unit,
     onSeedSamples: () -> Unit,
@@ -114,12 +122,12 @@ fun SwipeDeckScreen(
     modifier: Modifier = Modifier,
 ) {
     var programmaticSwipe by remember { mutableStateOf<Pair<Long, SwipeDirection>?>(null) }
-    var topCardDragProgress by remember { mutableFloatStateOf(0f) }
+    var topCardSignedProgress by remember { mutableFloatStateOf(0f) }
 
     val topPhoto = state.deckPhotos.firstOrNull()
 
     LaunchedEffect(topPhoto?.id) {
-        topCardDragProgress = 0f
+        topCardSignedProgress = 0f
         if (programmaticSwipe != null && programmaticSwipe?.first != topPhoto?.id) {
             programmaticSwipe = null
         }
@@ -128,7 +136,7 @@ fun SwipeDeckScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(top = 8.dp),
+            .padding(top = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // Top Header Bar
@@ -139,37 +147,13 @@ fun SwipeDeckScreen(
             onOpenTrashTab = onOpenTrashTab,
         )
 
-        // Album Filter Strip
-        if (state.albums.size > 1) {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(state.albums, key = { it.name }) { album ->
-                    val selected = album.name == state.selectedAlbum
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onSelectAlbum(album.name) },
-                        label = {
-                            Text(
-                                text = "${album.name} (${album.count})",
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = FlameCoral.copy(alpha = 0.2f),
-                            selectedLabelColor = FlameCoral,
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true,
-                            selected = selected,
-                            selectedBorderColor = FlameCoral.copy(alpha = 0.6f),
-                        ),
-                    )
-                }
-            }
+        // Month-wise & Album Filter Strip
+        if (state.months.isNotEmpty() || state.albums.size > 1) {
+            FilterStrip(
+                state = state,
+                onSelectAlbum = onSelectAlbum,
+                onSelectMonth = onSelectMonth,
+            )
         }
 
         // Main Card Stack Area
@@ -177,8 +161,8 @@ fun SwipeDeckScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .widthIn(max = 560.dp)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .widthIn(max = 580.dp)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             contentAlignment = Alignment.Center,
         ) {
             when {
@@ -196,15 +180,22 @@ fun SwipeDeckScreen(
                     }
                 }
                 state.deckPhotos.isEmpty() -> {
+                    val activeMonth = state.months.firstOrNull { it.key == state.selectedMonth }
                     EmptyDeckCard(
                         hasAnyPhotosOnDevice = state.allPhotosCount > 0,
                         isAllAlbum = state.selectedAlbum == ALBUM_ALL,
+                        isSpecificMonth = state.selectedMonth != MONTH_ALL,
+                        selectedMonthLabel = activeMonth?.label,
+                        isSelectedMonthCompleted = activeMonth?.isCompleted == true,
+                        nextUnfinishedMonth = state.nextUnfinishedMonth,
                         trashCount = state.trashQueue.size,
                         trashSizeLabel = formatFileSize(state.trashTotalBytes),
                         isSeeding = state.isSeeding,
                         onSeedSamples = onSeedSamples,
                         onIncludeReviewed = onIncludeReviewed,
                         onShowAllAlbums = { onSelectAlbum(ALBUM_ALL) },
+                        onShowAllMonths = { onSelectMonth(MONTH_ALL) },
+                        onSelectNextMonth = { month -> onSelectMonth(month.key) },
                         onOpenTrashTab = onOpenTrashTab,
                     )
                 }
@@ -217,14 +208,14 @@ fun SwipeDeckScreen(
                             SwipeablePhotoCard(
                                 photo = photo,
                                 stackIndex = stackIndex,
-                                behindProgress = if (isTop) 0f else topCardDragProgress,
+                                behindProgress = if (isTop) 0f else abs(topCardSignedProgress),
                                 programmaticDirection = if (isTop && programmaticSwipe?.first == photo.id) {
                                     programmaticSwipe?.second
                                 } else {
                                     null
                                 },
-                                onDragProgress = { progress ->
-                                    if (isTop) topCardDragProgress = progress
+                                onDragProgress = { signedProgress ->
+                                    if (isTop) topCardSignedProgress = signedProgress
                                 },
                                 onSwiped = { direction ->
                                     if (programmaticSwipe?.first == photo.id) {
@@ -242,10 +233,11 @@ fun SwipeDeckScreen(
             }
         }
 
-        // Bottom Tactile Action Dock
+        // Bottom Simple & Smart Action Dock
         SwipeActionDock(
             hasActiveCard = topPhoto != null && !state.isLoading,
             canUndo = state.canUndo,
+            dragProgress = topCardSignedProgress,
             onUndo = onUndo,
             onTrashClick = {
                 topPhoto?.let {
@@ -254,7 +246,6 @@ fun SwipeDeckScreen(
                     }
                 }
             },
-            onInspectClick = { topPhoto?.let(onInspectPhoto) },
             onKeepClick = {
                 topPhoto?.let {
                     if (programmaticSwipe == null) {
@@ -263,6 +254,150 @@ fun SwipeDeckScreen(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun FilterStrip(
+    state: TindPhotoUiState,
+    onSelectAlbum: (String) -> Unit,
+    onSelectMonth: (String) -> Unit,
+) {
+    var albumMenuExpanded by remember { mutableStateOf(false) }
+
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (state.albums.size > 1) {
+            item(key = "album_picker") {
+                Box {
+                    val albumActive = state.selectedAlbum != ALBUM_ALL
+                    FilterChip(
+                        selected = albumActive,
+                        onClick = { albumMenuExpanded = true },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Rounded.FolderOpen,
+                                contentDescription = "Filter by album",
+                                modifier = Modifier.size(16.dp),
+                            )
+                        },
+                        label = {
+                            Text(
+                                text = state.selectedAlbum,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = FlameCoral.copy(alpha = 0.2f),
+                            selectedLabelColor = FlameCoral,
+                            selectedLeadingIconColor = FlameCoral,
+                        ),
+                        modifier = Modifier.testTag("album_dropdown_chip"),
+                    )
+
+                    DropdownMenu(
+                        expanded = albumMenuExpanded,
+                        onDismissRequest = { albumMenuExpanded = false },
+                    ) {
+                        state.albums.forEach { album ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "${album.name} (${album.count})",
+                                        fontWeight = if (album.name == state.selectedAlbum) {
+                                            FontWeight.Bold
+                                        } else {
+                                            FontWeight.Normal
+                                        },
+                                    )
+                                },
+                                onClick = {
+                                    albumMenuExpanded = false
+                                    onSelectAlbum(album.name)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        items(state.months, key = { it.key }) { month ->
+            val selected = month.key == state.selectedMonth
+            val isCompleted = month.isCompleted
+
+            FilterChip(
+                selected = selected,
+                onClick = { onSelectMonth(month.key) },
+                leadingIcon = {
+                    if (isCompleted) {
+                        Icon(
+                            imageVector = Icons.Rounded.CheckCircle,
+                            contentDescription = "Month completed",
+                            tint = KeepEmerald,
+                            modifier = Modifier.size(17.dp),
+                        )
+                    } else if (month.key != MONTH_ALL) {
+                        Icon(
+                            imageVector = Icons.Rounded.CalendarMonth,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                },
+                label = {
+                    val suffix = when {
+                        isCompleted -> ""
+                        month.key == MONTH_ALL -> " (${month.remainingCount})"
+                        else -> " (${month.remainingCount}/${month.totalCount})"
+                    }
+                    Text(
+                        text = "${month.label}$suffix",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = if (isCompleted && !selected) {
+                        KeepEmerald.copy(alpha = 0.10f)
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerLow
+                    },
+                    labelColor = if (isCompleted && !selected) {
+                        KeepEmerald
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    selectedContainerColor = if (isCompleted) {
+                        KeepEmerald.copy(alpha = 0.22f)
+                    } else {
+                        FlameCoral.copy(alpha = 0.2f)
+                    },
+                    selectedLabelColor = if (isCompleted) KeepEmerald else FlameCoral,
+                    selectedLeadingIconColor = if (isCompleted) KeepEmerald else FlameCoral,
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = selected,
+                    borderColor = if (isCompleted) {
+                        KeepEmerald.copy(alpha = 0.5f)
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    },
+                    selectedBorderColor = if (isCompleted) {
+                        KeepEmerald.copy(alpha = 0.75f)
+                    } else {
+                        FlameCoral.copy(alpha = 0.65f)
+                    },
+                ),
+                modifier = Modifier.testTag("month_chip_${month.key}"),
+            )
+        }
     }
 }
 
@@ -409,13 +544,10 @@ private fun SwipeablePhotoCard(
 
     LaunchedEffect(programmaticDirection) {
         if (isTop && programmaticDirection != null) {
-            val targetX = if (programmaticDirection == SwipeDirection.RIGHT_KEEP) {
-                flyOutDistance
-            } else {
-                -flyOutDistance
-            }
+            val isRight = programmaticDirection == SwipeDirection.RIGHT_KEEP
+            val targetX = if (isRight) flyOutDistance else -flyOutDistance
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            onDragProgress(1f)
+            onDragProgress(if (isRight) 1f else -1f)
             offsetX.animateTo(targetX, animationSpec = tween(durationMillis = 220))
             onSwiped(programmaticDirection)
         }
@@ -489,8 +621,8 @@ private fun SwipeablePhotoCard(
                         val nextY = (offsetY.value + dragAmount.y * 0.35f).coerceIn(-140f, 140f)
                         offsetX.snapTo(nextX)
                         offsetY.snapTo(nextY)
-                        val progress = (abs(nextX) / thresholdPx).coerceIn(0f, 1f)
-                        onDragProgress(progress)
+                        val signedProgress = (nextX / thresholdPx).coerceIn(-1f, 1f)
+                        onDragProgress(signedProgress)
 
                         val nowCrossed = abs(nextX) >= thresholdPx
                         if (nowCrossed && !crossedThreshold) {
@@ -542,21 +674,25 @@ private fun SwipeablePhotoCard(
                 },
             ),
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = Color(0xFF0A0A0F),
         shadowElevation = if (isTop) 12.dp else 4.dp,
         border = BorderStroke(
             width = 1.dp,
             color = MaterialTheme.colorScheme.outlineVariant,
         ),
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0A0A0F)),
+        ) {
             AsyncImage(
                 model = ImageRequest.Builder(context)
                     .data(photo.uri)
                     .crossfade(true)
                     .build(),
                 contentDescription = photo.displayName,
-                contentScale = ContentScale.Crop,
+                contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize(),
             )
 
@@ -565,12 +701,12 @@ private fun SwipeablePhotoCard(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .height(140.dp)
+                    .height(128.dp)
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                Color.Black.copy(alpha = 0.78f),
+                                Color.Black.copy(alpha = 0.82f),
                             ),
                         ),
                     ),
@@ -581,7 +717,7 @@ private fun SwipeablePhotoCard(
                 Surface(
                     onClick = onTapZoom,
                     shape = CircleShape,
-                    color = Color.Black.copy(alpha = 0.45f),
+                    color = Color.Black.copy(alpha = 0.52f),
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(14.dp),
@@ -628,7 +764,7 @@ private fun SwipeablePhotoCard(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
@@ -723,114 +859,127 @@ private fun SwipeStampBadge(
 private fun SwipeActionDock(
     hasActiveCard: Boolean,
     canUndo: Boolean,
+    dragProgress: Float,
     onUndo: () -> Unit,
     onTrashClick: () -> Unit,
-    onInspectClick: () -> Unit,
     onKeepClick: () -> Unit,
 ) {
+    val trashBoost = if (hasActiveCard && dragProgress < 0f) (-dragProgress).coerceIn(0f, 1f) else 0f
+    val keepBoost = if (hasActiveCard && dragProgress > 0f) dragProgress.coerceIn(0f, 1f) else 0f
+
+    val trashScale by animateFloatAsState(
+        targetValue = 1f + (0.14f * trashBoost),
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "trashScale",
+    )
+    val keepScale by animateFloatAsState(
+        targetValue = 1f + (0.14f * keepBoost),
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "keepScale",
+    )
+
+    val trashContainer = if (hasActiveCard) {
+        lerp(TrashCrimson.copy(alpha = 0.14f), TrashCrimson, trashBoost)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
+    }
+    val trashIconTint = if (hasActiveCard) {
+        lerp(TrashCrimson, Color.White, trashBoost)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    }
+
+    val keepContainer = if (hasActiveCard) {
+        lerp(KeepEmerald.copy(alpha = 0.14f), KeepEmerald, keepBoost)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
+    }
+    val keepIconTint = if (hasActiveCard) {
+        lerp(KeepEmerald, Color(0xFF042619), keepBoost)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .widthIn(max = 460.dp)
-            .padding(horizontal = 24.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+            .widthIn(max = 340.dp)
+            .padding(horizontal = 24.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Undo Button
-        Surface(
-            onClick = onUndo,
-            enabled = canUndo,
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(
-                1.dp,
-                if (canUndo) UndoAmber.copy(alpha = 0.55f) else MaterialTheme.colorScheme.outlineVariant,
-            ),
-            modifier = Modifier
-                .size(50.dp)
-                .testTag("undo_swipe_button"),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Rounded.Undo,
-                    contentDescription = stringResource(R.string.cd_undo),
-                    tint = if (canUndo) UndoAmber else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-        }
-
-        // Trash / Swipe Left Button
+        // Simple & Smart X (Delete) Button
         Surface(
             onClick = onTrashClick,
             enabled = hasActiveCard,
             shape = CircleShape,
-            color = if (hasActiveCard) TrashCrimson.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceContainer,
-            border = BorderStroke(
-                2.dp,
-                if (hasActiveCard) TrashCrimson else MaterialTheme.colorScheme.outlineVariant,
-            ),
-            shadowElevation = if (hasActiveCard) 6.dp else 0.dp,
+            color = trashContainer,
             modifier = Modifier
-                .size(66.dp)
+                .size(62.dp)
+                .graphicsLayer {
+                    scaleX = trashScale
+                    scaleY = trashScale
+                }
                 .testTag("trash_action_button"),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = Icons.Rounded.Close,
                     contentDescription = stringResource(R.string.cd_trash),
-                    tint = if (hasActiveCard) TrashCrimson else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                    modifier = Modifier.size(32.dp),
+                    tint = trashIconTint,
+                    modifier = Modifier.size(30.dp),
                 )
             }
         }
 
-        // Inspect / Info Button
+        // Centered Undo Button
         Surface(
-            onClick = onInspectClick,
-            enabled = hasActiveCard,
+            onClick = onUndo,
+            enabled = canUndo,
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            color = if (canUndo) {
+                UndoAmber.copy(alpha = 0.14f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
+            },
             modifier = Modifier
-                .size(50.dp)
-                .testTag("inspect_action_button"),
+                .size(48.dp)
+                .testTag("undo_swipe_button"),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    imageVector = Icons.Rounded.Info,
-                    contentDescription = stringResource(R.string.cd_inspect),
-                    tint = if (hasActiveCard) {
-                        MaterialTheme.colorScheme.onSurface
+                    imageVector = Icons.AutoMirrored.Rounded.Undo,
+                    contentDescription = stringResource(R.string.cd_undo),
+                    tint = if (canUndo) {
+                        UndoAmber
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
                     },
                     modifier = Modifier.size(22.dp),
                 )
             }
         }
 
-        // Keep / Swipe Right Button
+        // Simple & Smart Heart (Keep) Button
         Surface(
             onClick = onKeepClick,
             enabled = hasActiveCard,
             shape = CircleShape,
-            color = if (hasActiveCard) KeepEmerald.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceContainer,
-            border = BorderStroke(
-                2.dp,
-                if (hasActiveCard) KeepEmerald else MaterialTheme.colorScheme.outlineVariant,
-            ),
-            shadowElevation = if (hasActiveCard) 6.dp else 0.dp,
+            color = keepContainer,
             modifier = Modifier
-                .size(66.dp)
+                .size(62.dp)
+                .graphicsLayer {
+                    scaleX = keepScale
+                    scaleY = keepScale
+                }
                 .testTag("keep_action_button"),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = Icons.Rounded.Favorite,
                     contentDescription = stringResource(R.string.cd_keep),
-                    tint = if (hasActiveCard) KeepEmerald else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                    modifier = Modifier.size(30.dp),
+                    tint = keepIconTint,
+                    modifier = Modifier.size(28.dp),
                 )
             }
         }
@@ -841,12 +990,18 @@ private fun SwipeActionDock(
 private fun EmptyDeckCard(
     hasAnyPhotosOnDevice: Boolean,
     isAllAlbum: Boolean,
+    isSpecificMonth: Boolean,
+    selectedMonthLabel: String?,
+    isSelectedMonthCompleted: Boolean,
+    nextUnfinishedMonth: MonthSummary?,
     trashCount: Int,
     trashSizeLabel: String,
     isSeeding: Boolean,
     onSeedSamples: () -> Unit,
     onIncludeReviewed: () -> Unit,
     onShowAllAlbums: () -> Unit,
+    onShowAllMonths: () -> Unit,
+    onSelectNextMonth: (MonthSummary) -> Unit,
     onOpenTrashTab: () -> Unit,
 ) {
     Surface(
@@ -863,20 +1018,42 @@ private fun EmptyDeckCard(
                 .padding(horizontal = 24.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            TindPhotoArtwork()
+            if (isSpecificMonth && isSelectedMonthCompleted) {
+                Box(
+                    modifier = Modifier
+                        .size(84.dp)
+                        .clip(CircleShape)
+                        .background(KeepEmerald.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.CheckCircle,
+                        contentDescription = "Month completed",
+                        tint = KeepEmerald,
+                        modifier = Modifier.size(48.dp),
+                    )
+                }
+            } else {
+                TindPhotoArtwork()
+            }
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = stringResource(
-                    if (hasAnyPhotosOnDevice) R.string.empty_deck_title else R.string.empty_gallery_title,
-                ),
+                text = when {
+                    !hasAnyPhotosOnDevice -> stringResource(R.string.empty_gallery_title)
+                    isSpecificMonth && selectedMonthLabel != null -> "$selectedMonthLabel Done"
+                    else -> stringResource(R.string.empty_deck_title)
+                },
                 style = MaterialTheme.typography.headlineSmall,
                 textAlign = TextAlign.Center,
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = stringResource(
-                    if (hasAnyPhotosOnDevice) R.string.empty_deck_subtitle else R.string.empty_gallery_subtitle,
-                ),
+                text = when {
+                    !hasAnyPhotosOnDevice -> stringResource(R.string.empty_gallery_subtitle)
+                    isSpecificMonth && selectedMonthLabel != null ->
+                        "All photos from $selectedMonthLabel have been reviewed."
+                    else -> stringResource(R.string.empty_deck_subtitle)
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -930,18 +1107,46 @@ private fun EmptyDeckCard(
                     Text(stringResource(R.string.add_sample_photos))
                 }
             } else {
-                if (!isAllAlbum) {
+                if (nextUnfinishedMonth != null) {
                     Button(
+                        onClick = { onSelectNextMonth(nextUnfinishedMonth) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("next_unfinished_month_button"),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = FlameCoral,
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        Icon(Icons.Rounded.CalendarMonth, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Next: ${nextUnfinishedMonth.label} (${nextUnfinishedMonth.remainingCount})")
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+                if (isSpecificMonth) {
+                    OutlinedButton(
+                        onClick = onShowAllMonths,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("show_all_months_button"),
+                        shape = CircleShape,
+                    ) {
+                        Text("Show All Months")
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+                if (!isAllAlbum) {
+                    OutlinedButton(
                         onClick = onShowAllAlbums,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
                             .testTag("show_all_albums_button"),
                         shape = CircleShape,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = FlameCoral,
-                            contentColor = Color.White,
-                        ),
                     ) {
                         Text(stringResource(R.string.switch_to_all_photos))
                     }

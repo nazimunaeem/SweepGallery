@@ -248,6 +248,7 @@ fun TindPhotoApp(
                                         onInspectPhoto = viewModel::openInspector,
                                         onOpenLightbox = viewModel::openLightbox,
                                         onSelectAlbum = viewModel::selectAlbum,
+                                        onSelectMonth = viewModel::selectMonth,
                                         onSelectSortOrder = viewModel::setSortOrder,
                                         onRefresh = viewModel::refreshGallery,
                                         onSeedSamples = viewModel::seedSamplePhotos,
@@ -272,6 +273,10 @@ fun TindPhotoApp(
                                         state = state,
                                         onSelectAlbumAndSwipe = { album ->
                                             viewModel.selectAlbum(album)
+                                            navigateToTab(ROUTE_SWIPE)
+                                        },
+                                        onSelectMonthAndSwipe = { monthKey ->
+                                            viewModel.selectMonth(monthKey)
                                             navigateToTab(ROUTE_SWIPE)
                                         },
                                         onSetSortOrder = viewModel::setSortOrder,

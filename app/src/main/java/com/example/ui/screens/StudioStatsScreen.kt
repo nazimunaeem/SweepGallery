@@ -20,6 +20,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteSweep
@@ -49,18 +51,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.model.AlbumSummary
+import com.example.model.MonthSummary
 import com.example.model.SortOrder
 import com.example.model.formatFileSize
 import com.example.ui.theme.FlameCoral
 import com.example.ui.theme.FlameOrange
 import com.example.ui.theme.KeepEmerald
 import com.example.ui.theme.TrashCrimson
+import com.example.ui.viewmodel.MONTH_ALL
 import com.example.ui.viewmodel.TindPhotoUiState
 
 @Composable
 fun StudioStatsScreen(
     state: TindPhotoUiState,
     onSelectAlbumAndSwipe: (String) -> Unit,
+    onSelectMonthAndSwipe: (String) -> Unit,
     onSetSortOrder: (SortOrder) -> Unit,
     onSetIncludeReviewed: (Boolean) -> Unit,
     onSetDarkMode: (Boolean) -> Unit,
@@ -68,6 +73,8 @@ fun StudioStatsScreen(
     onSeedSamples: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val specificMonths = state.months.filter { it.key != MONTH_ALL }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
@@ -85,7 +92,7 @@ fun StudioStatsScreen(
                     style = MaterialTheme.typography.headlineMedium,
                 )
                 Text(
-                    text = "Track space reclaimed and jump into albums",
+                    text = "Track space reclaimed and filter by month or album",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -117,6 +124,31 @@ fun StudioStatsScreen(
             )
         }
 
+        // Month-wise Quick Clean Section
+        if (specificMonths.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Filter by Month",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 680.dp)
+                        .padding(top = 4.dp),
+                )
+            }
+
+            items(specificMonths, key = { "month_${it.key}" }) { month ->
+                MonthRowCard(
+                    month = month,
+                    isSelected = month.key == state.selectedMonth,
+                    onClick = { onSelectMonthAndSwipe(month.key) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 680.dp),
+                )
+            }
+        }
+
         // Album Quick-Clean Section
         if (state.albums.isNotEmpty()) {
             item {
@@ -140,6 +172,99 @@ fun StudioStatsScreen(
                         .widthIn(max = 680.dp),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun MonthRowCard(
+    month: MonthSummary,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.testTag("stats_month_row_${month.key}"),
+        shape = MaterialTheme.shapes.medium,
+        color = when {
+            month.isCompleted -> KeepEmerald.copy(alpha = 0.09f)
+            isSelected -> FlameCoral.copy(alpha = 0.12f)
+            else -> MaterialTheme.colorScheme.surfaceContainer
+        },
+        border = BorderStroke(
+            width = 1.dp,
+            color = when {
+                month.isCompleted -> KeepEmerald.copy(alpha = 0.45f)
+                isSelected -> FlameCoral.copy(alpha = 0.5f)
+                else -> MaterialTheme.colorScheme.outlineVariant
+            },
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(
+                            when {
+                                month.isCompleted -> KeepEmerald.copy(alpha = 0.2f)
+                                isSelected -> FlameCoral.copy(alpha = 0.2f)
+                                else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (month.isCompleted) {
+                            Icons.Rounded.CheckCircle
+                        } else {
+                            Icons.Rounded.CalendarMonth
+                        },
+                        contentDescription = if (month.isCompleted) "Completed" else null,
+                        tint = when {
+                            month.isCompleted -> KeepEmerald
+                            isSelected -> FlameCoral
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Column {
+                    Text(
+                        text = month.label,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = if (isSelected || month.isCompleted) FontWeight.Bold else FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = if (month.isCompleted) {
+                            "${month.totalCount} photos • Done"
+                        } else {
+                            "${month.remainingCount} of ${month.totalCount} left • ${formatFileSize(month.totalBytes)}"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (month.isCompleted) KeepEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
