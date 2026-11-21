@@ -4,10 +4,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,17 +24,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.LocalCafe
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -46,15 +50,23 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.model.AlbumSummary
 import com.example.model.MonthSummary
 import com.example.model.SortOrder
@@ -62,10 +74,18 @@ import com.example.model.formatFileSize
 import com.example.ui.theme.FlameCoral
 import com.example.ui.theme.FlameOrange
 import com.example.ui.theme.KeepEmerald
+import com.example.ui.theme.SweepLogoAccentDark
+import com.example.ui.theme.SweepLogoAccentLight
+import com.example.ui.theme.SweepLogoStart
 import com.example.ui.theme.TrashCrimson
 import com.example.ui.viewmodel.MONTH_ALL
 import com.example.ui.viewmodel.TindPhotoUiState
 import com.example.ui.viewmodel.UpdateUiState
+
+private enum class StudioBrowseTab {
+    MONTH,
+    ALBUM,
+}
 
 @Composable
 fun StudioStatsScreen(
@@ -82,114 +102,303 @@ fun StudioStatsScreen(
     modifier: Modifier = Modifier,
 ) {
     val specificMonths = state.months.filter { it.key != MONTH_ALL }
+    var selectedBrowseTab by rememberSaveable { mutableStateOf(StudioBrowseTab.MONTH) }
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val gridColumns = if (maxWidth >= 560.dp) 4 else 3
+        val monthRows = specificMonths.chunked(gridColumns)
+        val albumRows = state.albums.chunked(gridColumns)
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("studio_lazy_column"),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 680.dp),
+                ) {
+                    Text(
+                        text = "Studio & Stats",
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+                    Text(
+                        text = "Track space reclaimed and filter by month or album",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            // Simple Developer Credit & Support Link
+            item {
+                DeveloperSupportCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 680.dp),
+                )
+            }
+
+            // Storage Impact Hero Card
+            item {
+                StorageImpactCard(
+                    state = state,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 680.dp),
+                )
+            }
+
+            // Preferences & Controls Card
+            item {
+                PreferencesCard(
+                    state = state,
+                    onSetSortOrder = onSetSortOrder,
+                    onSetIncludeReviewed = onSetIncludeReviewed,
+                    onSetDarkMode = onSetDarkMode,
+                    onResetKeptHistory = onResetKeptHistory,
+                    onSeedSamples = onSeedSamples,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 680.dp),
+                )
+            }
+
+            // App Updates Card
+            item {
+                AppUpdatesCard(
+                    state = state,
+                    onCheckForUpdates = onCheckForUpdates,
+                    onOpenUpdateDialog = onOpenUpdateDialog,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 680.dp),
+                )
+            }
+
+            // Two-tab Month / Album Square Grid Browser
+            if (specificMonths.isNotEmpty() || state.albums.isNotEmpty()) {
+                item {
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = 680.dp)
+                            .padding(top = 4.dp),
+                    ) {
+                        SegmentedButton(
+                            selected = selectedBrowseTab == StudioBrowseTab.MONTH,
+                            onClick = { selectedBrowseTab = StudioBrowseTab.MONTH },
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                            icon = {
+                                SegmentedButtonDefaults.Icon(
+                                    active = selectedBrowseTab == StudioBrowseTab.MONTH,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.CalendarMonth,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            },
+                            modifier = Modifier.testTag("studio_tab_month"),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.studio_tab_month),
+                                maxLines = 1,
+                            )
+                        }
+                        SegmentedButton(
+                            selected = selectedBrowseTab == StudioBrowseTab.ALBUM,
+                            onClick = { selectedBrowseTab = StudioBrowseTab.ALBUM },
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                            icon = {
+                                SegmentedButtonDefaults.Icon(
+                                    active = selectedBrowseTab == StudioBrowseTab.ALBUM,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Folder,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            },
+                            modifier = Modifier.testTag("studio_tab_album"),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.studio_tab_album),
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+
+                when (selectedBrowseTab) {
+                    StudioBrowseTab.MONTH -> {
+                        if (monthRows.isEmpty()) {
+                            item {
+                                Text(
+                                    text = "No months available yet",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 12.dp),
+                                )
+                            }
+                        } else {
+                            items(
+                                items = monthRows,
+                                key = { row -> "month_row_${row.first().key}" },
+                            ) { rowItems ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .widthIn(max = 680.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    rowItems.forEach { month ->
+                                        MonthSquareTile(
+                                            month = month,
+                                            isSelected = month.key == state.selectedMonth,
+                                            onClick = { onSelectMonthAndSwipe(month.key) },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .aspectRatio(1f),
+                                        )
+                                    }
+                                    repeat(gridColumns - rowItems.size) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    StudioBrowseTab.ALBUM -> {
+                        if (albumRows.isEmpty()) {
+                            item {
+                                Text(
+                                    text = "No albums available yet",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 12.dp),
+                                )
+                            }
+                        } else {
+                            items(
+                                items = albumRows,
+                                key = { row -> "album_row_${row.first().name}" },
+                            ) { rowItems ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .widthIn(max = 680.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    rowItems.forEach { album ->
+                                        AlbumSquareTile(
+                                            album = album,
+                                            isSelected = album.name == state.selectedAlbum,
+                                            onClick = { onSelectAlbumAndSwipe(album.name) },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .aspectRatio(1f),
+                                        )
+                                    }
+                                    repeat(gridColumns - rowItems.size) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeveloperSupportCard(modifier: Modifier = Modifier) {
+    val uriHandler = LocalUriHandler.current
+    val supportUrl = stringResource(R.string.support_url)
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val accentColor = if (isDark) SweepLogoAccentDark else SweepLogoAccentLight
+
+    Surface(
+        modifier = modifier.testTag("developer_credit_card"),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 680.dp),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(
-                    text = "Studio & Stats",
-                    style = MaterialTheme.typography.headlineMedium,
-                )
-                Text(
-                    text = "Track space reclaimed and filter by month or album",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        // Storage Impact Hero Card
-        item {
-            StorageImpactCard(
-                state = state,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 680.dp),
-            )
-        }
-
-        // Preferences & Controls Card
-        item {
-            PreferencesCard(
-                state = state,
-                onSetSortOrder = onSetSortOrder,
-                onSetIncludeReviewed = onSetIncludeReviewed,
-                onSetDarkMode = onSetDarkMode,
-                onResetKeptHistory = onResetKeptHistory,
-                onSeedSamples = onSeedSamples,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 680.dp),
-            )
-        }
-
-        // App Updates Card
-        item {
-            AppUpdatesCard(
-                state = state,
-                onCheckForUpdates = onCheckForUpdates,
-                onOpenUpdateDialog = onOpenUpdateDialog,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 680.dp),
-            )
-        }
-
-        // Month-wise Quick Clean Section
-        if (specificMonths.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Filter by Month",
-                    style = MaterialTheme.typography.titleLarge,
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = 680.dp)
-                        .padding(top = 4.dp),
-                )
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(SweepLogoStart.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Person,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                Column {
+                    Text(
+                        text = stringResource(R.string.developer_label),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = stringResource(R.string.developer_name),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
 
-            items(specificMonths, key = { "month_${it.key}" }) { month ->
-                MonthRowCard(
-                    month = month,
-                    isSelected = month.key == state.selectedMonth,
-                    onClick = { onSelectMonthAndSwipe(month.key) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = 680.dp),
-                )
-            }
-        }
+            Spacer(Modifier.width(8.dp))
 
-        // Album Quick-Clean Section
-        if (state.albums.isNotEmpty()) {
-            item {
+            FilledTonalButton(
+                onClick = { runCatching { uriHandler.openUri(supportUrl) } },
+                modifier = Modifier.testTag("support_developer_button"),
+                shape = CircleShape,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = SweepLogoStart.copy(alpha = 0.16f),
+                    contentColor = accentColor,
+                ),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.LocalCafe,
+                    contentDescription = null,
+                    modifier = Modifier.size(15.dp),
+                )
+                Spacer(Modifier.width(5.dp))
                 Text(
-                    text = "Albums on Device",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = 680.dp)
-                        .padding(top = 4.dp),
-                )
-            }
-
-            items(state.albums, key = { it.name }) { album ->
-                AlbumRowCard(
-                    album = album,
-                    isSelected = album.name == state.selectedAlbum,
-                    onClick = { onSelectAlbumAndSwipe(album.name) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = 680.dp),
+                    text = stringResource(R.string.support_button),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
                 )
             }
         }
@@ -197,7 +406,7 @@ fun StudioStatsScreen(
 }
 
 @Composable
-private fun MonthRowCard(
+private fun MonthSquareTile(
     month: MonthSummary,
     isSelected: Boolean,
     onClick: () -> Unit,
@@ -216,26 +425,25 @@ private fun MonthRowCard(
             width = 1.dp,
             color = when {
                 month.isCompleted -> KeepEmerald.copy(alpha = 0.45f)
-                isSelected -> FlameCoral.copy(alpha = 0.5f)
+                isSelected -> FlameCoral.copy(alpha = 0.55f)
                 else -> MaterialTheme.colorScheme.outlineVariant
             },
         ),
     ) {
-        Row(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .fillMaxSize()
+                .padding(10.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
         ) {
             Row(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(28.dp)
                         .clip(CircleShape)
                         .background(
                             when {
@@ -258,33 +466,39 @@ private fun MonthRowCard(
                             isSelected -> FlameCoral
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(15.dp),
                     )
                 }
-                Column {
-                    Text(
-                        text = month.label,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = if (isSelected || month.isCompleted) FontWeight.Bold else FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = if (month.isCompleted) {
-                            "${month.totalCount} photos • Done"
-                        } else {
-                            "${month.remainingCount} of ${month.totalCount} left • ${formatFileSize(month.totalBytes)}"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (month.isCompleted) KeepEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+
+                Text(
+                    text = if (month.isCompleted) "Done" else "${month.remainingCount}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = when {
+                        month.isCompleted -> KeepEmerald
+                        isSelected -> FlameCoral
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 1,
+                )
             }
-            Icon(
-                imageVector = Icons.Rounded.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = month.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = if (isSelected || month.isCompleted) FontWeight.Bold else FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = formatFileSize(month.totalBytes),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (month.isCompleted) KeepEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -576,7 +790,7 @@ private fun PreferencesCard(
 }
 
 @Composable
-private fun AlbumRowCard(
+private fun AlbumSquareTile(
     album: AlbumSummary,
     isSelected: Boolean,
     onClick: () -> Unit,
@@ -593,24 +807,23 @@ private fun AlbumRowCard(
         },
         border = BorderStroke(
             width = 1.dp,
-            color = if (isSelected) FlameCoral.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant,
+            color = if (isSelected) FlameCoral.copy(alpha = 0.55f) else MaterialTheme.colorScheme.outlineVariant,
         ),
     ) {
-        Row(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .fillMaxSize()
+                .padding(10.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
         ) {
             Row(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(28.dp)
                         .clip(CircleShape)
                         .background(
                             if (isSelected) FlameCoral.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -621,29 +834,35 @@ private fun AlbumRowCard(
                         imageVector = Icons.Rounded.Folder,
                         contentDescription = null,
                         tint = if (isSelected) FlameCoral else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(15.dp),
                     )
                 }
-                Column {
-                    Text(
-                        text = album.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = "${album.count} photos • ${formatFileSize(album.totalBytes)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+
+                Text(
+                    text = album.count.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isSelected) FlameCoral else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
             }
-            Icon(
-                imageVector = Icons.Rounded.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = album.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = formatFileSize(album.totalBytes),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

@@ -19,6 +19,8 @@ data class PhotoItem(
     val width: Int,
     val height: Int,
     val albumName: String,
+    val mimeType: String = "",
+    val directoryPath: String = "",
 ) {
     val effectiveDateMillis: Long =
         if (dateTakenMillis > 0L) dateTakenMillis else dateAddedSeconds * 1000L
@@ -31,6 +33,10 @@ data class PhotoItem(
         formatPhotoDate(effectiveDateMillis)
     }
 
+    val formattedDateTime: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        formatPhotoDateTime(effectiveDateMillis)
+    }
+
     val monthKey: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
         formatMonthKey(effectiveDateMillis)
     }
@@ -41,6 +47,32 @@ data class PhotoItem(
 
     val resolutionLabel: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
         if (width > 0 && height > 0) "${width} × ${height}" else "Unknown"
+    }
+
+    val resolutionWithMpLabel: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        if (width > 0 && height > 0) {
+            val mp = (width.toLong() * height.toLong()) / 1_000_000.0
+            if (mp >= 0.1) {
+                String.format(Locale.US, "%d × %d (%.1f MP)", width, height, mp)
+            } else {
+                "$width × $height"
+            }
+        } else {
+            "Unknown"
+        }
+    }
+
+    val formatLabel: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        val extFromName = displayName.substringAfterLast('.', "").uppercase(Locale.US)
+        when {
+            mimeType.contains('/') -> mimeType.substringAfter('/').uppercase(Locale.US)
+            extFromName.isNotBlank() -> extFromName
+            else -> "Image"
+        }
+    }
+
+    val displayDirectory: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        directoryPath.trim('/').ifBlank { albumName }
     }
 }
 
@@ -89,6 +121,10 @@ private val photoDateFormatter = ThreadLocal.withInitial {
     SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
 }
 
+private val photoDateTimeFormatter = ThreadLocal.withInitial {
+    SimpleDateFormat("MMM d, yyyy • h:mm a", Locale.getDefault())
+}
+
 private val monthKeyFormatter = ThreadLocal.withInitial {
     SimpleDateFormat("yyyy-MM", Locale.US)
 }
@@ -112,6 +148,11 @@ fun formatFileSize(bytes: Long): String {
 fun formatPhotoDate(millis: Long): String {
     if (millis <= 0L) return "Unknown date"
     return photoDateFormatter.get()?.format(Date(millis)) ?: "Unknown date"
+}
+
+fun formatPhotoDateTime(millis: Long): String {
+    if (millis <= 0L) return "Unknown date"
+    return photoDateTimeFormatter.get()?.format(Date(millis)) ?: "Unknown date"
 }
 
 fun formatMonthKey(millis: Long): String {

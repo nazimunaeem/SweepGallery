@@ -27,4 +27,15 @@
     <string name="cd_zoom">View full screen photo</string>
     <string name="cd_restore_photo">Restore photo from trash</string>
     <string name="cd_close_lightbox">Close full screen preview</string>
+    <string name="developer_label">Developed by</string>
+    <string name="developer_name">Md. Nazim Uddin</string>
+    <string name="support_button">Buy me a coffee</string>
+    <string name="support_url">https://www.supportkori.com/nazimunaeem</string>
+    <string name="studio_tab_month">Month</string>
+    <string name="studio_tab_album">Album</string>
+    <string name="directory_label">Directory</string>
+    <string name="show_in_files">Show in Files</string>
+    <string name="metadata_file_details">File Details</string>
+    <string name="metadata_camera_exif">Camera &amp; EXIF</string>
+    <string name="no_files_app_found">Could not open Files app for this folder</string>
 </resources>

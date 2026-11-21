@@ -22,6 +22,7 @@ import com.example.model.SwipeDirection
 import com.example.model.SwipeRecord
 import com.example.model.TindPhotoStats
 import com.example.model.formatFileSize
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -412,34 +413,62 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
     fun refreshGallery() {
         viewModelScope.launch {
             overlayState.update { it.copy(isLoading = true) }
-            val loaded = galleryRepository.loadDevicePhotos()
-            val validIds = loaded.map { it.id }.toSet()
-            galleryFilterState.update { current ->
-                current.copy(
-                    allPhotos = loaded,
-                    trashQueueIds = current.trashQueueIds.filter { it in validIds },
-                    sessionKeptIds = current.sessionKeptIds.filter { it in validIds }.toSet(),
-                )
+            try {
+                val loaded = galleryRepository.loadDevicePhotos()
+                val validIds = loaded.map { it.id }.toSet()
+                galleryFilterState.update { current ->
+                    current.copy(
+                        allPhotos = loaded,
+                        trashQueueIds = current.trashQueueIds.filter { it in validIds },
+                        sessionKeptIds = current.sessionKeptIds.filter { it in validIds }.toSet(),
+                    )
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                overlayState.update {
+                    it.copy(snackbarMessage = t.localizedMessage ?: "Unable to scan device photos")
+                }
+            } finally {
+                overlayState.update { it.copy(isLoading = false) }
             }
-            overlayState.update { it.copy(isLoading = false) }
         }
     }
 
     fun seedSamplePhotos() {
+        if (overlayState.value.isSeeding) return
         viewModelScope.launch {
             overlayState.update { it.copy(isSeeding = true) }
-            val count = samplePhotoSeeder.seedSamplePhotos()
-            val loaded = galleryRepository.loadDevicePhotos()
-            galleryFilterState.update { it.copy(allPhotos = loaded) }
-            overlayState.update {
-                it.copy(
-                    isSeeding = false,
-                    snackbarMessage = if (count > 0) {
-                        "Added $count sample photos across 3 months"
-                    } else {
+            try {
+                val result = samplePhotoSeeder.seedSamplePhotosResult()
+                val loaded = galleryRepository.loadDevicePhotos()
+                val validIds = loaded.map { it.id }.toSet()
+                galleryFilterState.update { current ->
+                    current.copy(
+                        allPhotos = loaded,
+                        trashQueueIds = current.trashQueueIds.filter { it in validIds },
+                        sessionKeptIds = current.sessionKeptIds.filter { it in validIds }.toSet(),
+                    )
+                }
+                val message = when {
+                    result.insertedCount > 0 ->
+                        "Added ${result.insertedCount} sample photos across 3 months"
+                    !result.errorMessage.isNullOrBlank() ->
+                        "Could not add sample photos: ${result.errorMessage}"
+                    else ->
                         "Could not add sample photos"
-                    },
-                )
+                }
+                overlayState.update { it.copy(snackbarMessage = message) }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                overlayState.update {
+                    it.copy(
+                        snackbarMessage = t.localizedMessage ?: "Could not add sample photos",
+                    )
+                }
+            } finally {
+                overlayState.update { it.copy(isSeeding = false) }
             }
         }
     }
@@ -586,25 +615,38 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
     private suspend fun finalizeDeletion(targets: List<PhotoItem>) {
         val freedBytes = targets.sumOf { it.sizeBytes }
         val deletedIds = targets.map { it.id }.toSet()
-        preferencesRepository.recordBatchDeletion(
-            deletedCount = targets.size,
-            freedBytes = freedBytes,
-            deletedIds = deletedIds,
-        )
-        val refreshed = galleryRepository.loadDevicePhotos()
-        galleryFilterState.update { current ->
-            current.copy(
-                allPhotos = refreshed,
-                trashQueueIds = current.trashQueueIds.filterNot { it in deletedIds },
-                undoStack = current.undoStack.filterNot { it.photo.id in deletedIds },
+        try {
+            preferencesRepository.recordBatchDeletion(
+                deletedCount = targets.size,
+                freedBytes = freedBytes,
+                deletedIds = deletedIds,
             )
-        }
-        overlayState.update {
-            it.copy(
-                isDeleting = false,
-                pendingDeletePhotos = emptyList(),
-                snackbarMessage = "Deleted ${targets.size} photos • Freed ${formatFileSize(freedBytes)}",
-            )
+            val refreshed = galleryRepository.loadDevicePhotos()
+            galleryFilterState.update { current ->
+                current.copy(
+                    allPhotos = refreshed,
+                    trashQueueIds = current.trashQueueIds.filterNot { it in deletedIds },
+                    undoStack = current.undoStack.filterNot { it.photo.id in deletedIds },
+                )
+            }
+            overlayState.update {
+                it.copy(
+                    snackbarMessage = "Deleted ${targets.size} photos • Freed ${formatFileSize(freedBytes)}",
+                )
+            }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            overlayState.update {
+                it.copy(snackbarMessage = t.localizedMessage ?: "Failed to refresh after deletion")
+            }
+        } finally {
+            overlayState.update {
+                it.copy(
+                    isDeleting = false,
+                    pendingDeletePhotos = emptyList(),
+                )
+            }
         }
     }
 

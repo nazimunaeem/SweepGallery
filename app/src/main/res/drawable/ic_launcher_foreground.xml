@@ -5,26 +5,62 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Crisp rounded photo card silhouette inside 66dp safe zone -->
+
+    <!-- Back translucent photo card tilted left for gallery stack depth -->
+    <group
+        android:pivotX="49"
+        android:pivotY="52"
+        android:rotation="-12">
+        <path
+            android:fillColor="#85FFFFFF"
+            android:pathData="M37,32 L61,32 Q67,32 67,38 L67,66 Q67,72 61,72 L37,72 Q31,72 31,66 L31,38 Q31,32 37,32 Z" />
+    </group>
+
+    <!-- Sweep motion lines trailing from left edge -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M40,31 L68,31 Q77,31 77,40 L77,68 Q77,77 68,77 L40,77 Q31,77 31,68 L31,40 Q31,31 40,31 Z" />
-    <!-- Bold SweepGallery spark emblem centered inside photo card -->
-    <path android:pathData="M54.5,39 C54.5,39 64,46.5 64,56 C64,62.5 59.5,67.5 54,67.5 C48.5,67.5 44,62.5 44,56 C44,52.2 45.8,48.5 48.2,46 C48.2,49.5 50.5,51.2 50.5,51.2 C50.5,46.5 52.5,42 54.5,39 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:endX="64"
-                android:endY="67.5"
-                android:startX="44"
-                android:startY="39"
-                android:type="linear">
-                <item
-                    android:color="#4F46E5"
-                    android:offset="0.0" />
-                <item
-                    android:color="#06B6D4"
-                    android:offset="1.0" />
-            </gradient>
-        </aapt:attr>
-    </path>
+        android:fillColor="#D9FFFFFF"
+        android:pathData="M24.5,48.5 L30.5,48.5 A1.5,1.5 0 0 1 30.5,51.5 L24.5,51.5 A1.5,1.5 0 0 1 24.5,48.5 Z" />
+    <path
+        android:fillColor="#B3FFFFFF"
+        android:pathData="M27,55.5 L31.5,55.5 A1.5,1.5 0 0 1 31.5,58.5 L27,58.5 A1.5,1.5 0 0 1 27,55.5 Z" />
+
+    <!-- Front crisp white Polaroid-style photo card tilted gently right -->
+    <group
+        android:pivotX="57"
+        android:pivotY="54"
+        android:rotation="7">
+        <!-- Outer white frame -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M45,32 L69,32 Q76,32 76,39 L76,69 Q76,76 69,76 L45,76 Q38,76 38,69 L38,39 Q38,32 45,32 Z" />
+
+        <!-- Inner photo window filled with brand indigo-cyan gradient -->
+        <path android:pathData="M46,36 L68,36 Q72,36 72,40 L72,60 Q72,64 68,64 L46,64 Q42,64 42,60 L42,40 Q42,36 46,36 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:endX="72"
+                    android:endY="64"
+                    android:startX="42"
+                    android:startY="36"
+                    android:type="linear">
+                    <item
+                        android:color="#4F46E5"
+                        android:offset="0.0" />
+                    <item
+                        android:color="#06B6D4"
+                        android:offset="1.0" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- Clean sun / aperture circle inside photo window -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M64.5,40.5 A3,3 0 1 1 64.49,40.5 Z" />
+
+        <!-- Crisp twin-peak landscape silhouette anchored to bottom of photo window -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M42,58.5 L49.5,49.5 Q51,47.8 52.5,49.5 L57.5,55.5 L61.5,51.5 Q63,50 64.5,51.5 L72,59 L72,60 Q72,64 68,64 L46,64 Q42,64 42,60 Z" />
+    </group>
 </vector>
