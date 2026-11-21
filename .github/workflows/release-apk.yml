@@ -70,27 +70,15 @@ jobs:
           echo "version_name=$VER_NAME" >> "$GITHUB_OUTPUT"
           echo "version_code=$VER_CODE" >> "$GITHUB_OUTPUT"
 
-      - name: Build APK
+      - name: Build Debug APK
         id: build_apk
-        env:
-          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           VER_NAME="${{ steps.release_tag.outputs.version_name }}"
           VER_CODE="${{ steps.release_tag.outputs.version_code }}"
-          if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
-            echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > my-upload-key.jks
-            gradle assembleRelease --no-daemon --stacktrace \
-              -PversionName="$VER_NAME" -PversionCode="$VER_CODE" \
-              -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8"
-            APK_PATH="app/build/outputs/apk/release/app-release.apk"
-          else
-            gradle assembleDebug --no-daemon --stacktrace \
-              -PversionName="$VER_NAME" -PversionCode="$VER_CODE" \
-              -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8"
-            APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
-          fi
+          gradle assembleDebug --no-daemon --stacktrace \
+            -PversionName="$VER_NAME" -PversionCode="$VER_CODE" \
+            -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8"
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
           if [ ! -f "$APK_PATH" ]; then
             echo "Expected APK not found at $APK_PATH"
             exit 1

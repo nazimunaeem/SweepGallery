@@ -82,11 +82,11 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## Automated Releases (CI/CD)
 
-`.github/workflows/release-apk.yml` builds and publishes APKs on pushes to `main`/`master`, `v*` tags, or manual workflow dispatch:
+`.github/workflows/release-apk.yml` builds and publishes debug-signed APKs (`app-debug.apk`) on pushes to `main`/`master`, `v*` tags, or manual workflow dispatch:
 
+- Decodes `debug.keystore.base64` so releases share a consistent debug signing key.
 - Uploads `SweepGallery-APK` as a workflow artifact.
-- Publishes `.apk` binaries to **GitHub Releases**.
-- Signs release builds automatically when `RELEASE_KEYSTORE_BASE64`, `STORE_PASSWORD`, and `KEY_PASSWORD` secrets are configured (falls back to debug APK otherwise).
+- Publishes `app-debug.apk` to **GitHub Releases**.
 
 ---
 
