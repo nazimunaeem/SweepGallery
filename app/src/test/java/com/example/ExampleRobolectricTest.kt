@@ -96,9 +96,9 @@ class ExampleRobolectricTest {
         MonthSummary("2026-10", "Oct 2026", 4, 0, 10_000_000L, true),
       ),
       albums = listOf(
-        AlbumSummary("All Photos", 10, 25_000_000L),
-        AlbumSummary("Camera", 7, 18_000_000L),
-        AlbumSummary("Screenshots", 3, 7_000_000L),
+        AlbumSummary("All Photos", 10, 25_000_000L, remainingCount = 8, isCompleted = false),
+        AlbumSummary("Camera", 7, 18_000_000L, remainingCount = 7, isCompleted = false),
+        AlbumSummary("Screenshots", 3, 7_000_000L, remainingCount = 0, isCompleted = true),
       ),
     )
 
@@ -129,7 +129,8 @@ class ExampleRobolectricTest {
       .performScrollToNode(hasTestTag("studio_tab_month"))
     composeTestRule.onNodeWithTag("studio_tab_month").assertIsDisplayed()
     composeTestRule.onNodeWithTag("studio_lazy_column")
-      .performScrollToNode(hasTestTag("stats_month_row_2026-11"))
+      .performScrollToNode(hasTestTag("stats_month_row_2026-10"))
+    composeTestRule.onNodeWithText("4 photos").assertIsDisplayed()
     composeTestRule.onNodeWithTag("stats_month_row_2026-11").performClick()
     assertEquals("2026-11", selectedMonth)
 
@@ -138,7 +139,8 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("studio_tab_album").performClick()
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("studio_lazy_column")
-      .performScrollToNode(hasTestTag("album_row_Camera"))
+      .performScrollToNode(hasTestTag("album_row_Screenshots"))
+    composeTestRule.onNodeWithText("3 photos").assertIsDisplayed()
     composeTestRule.onNodeWithTag("album_row_Camera").performClick()
     assertEquals("Camera", selectedAlbum)
   }
@@ -258,5 +260,41 @@ class ExampleRobolectricTest {
     val seeder = com.example.data.SamplePhotoSeeder(context)
     val result = seeder.seedSamplePhotosResult()
     assertNotNull(result)
+  }
+
+  @Test
+  fun `update available popup modal displays version notes and actions`() {
+    var downloadClicked = false
+    var dismissed = false
+    val release = com.example.data.GitHubReleaseInfo(
+      tagName = "v1.2.0",
+      title = "SweepGallery v1.2.0",
+      notes = "Faster swipes and Studio square grids.",
+      htmlUrl = "https://github.com/example/SweepGallery/releases/tag/v1.2.0",
+      apkDownloadUrl = "https://github.com/example/SweepGallery/releases/download/v1.2.0/app.apk",
+    )
+
+    composeTestRule.activityRule.scenario.onActivity { activity ->
+      activity.setContent {
+        TindPhotoTheme {
+          com.example.ui.UpdateAvailableDialog(
+            currentVersionName = "1.1.0",
+            release = release,
+            onDownload = { downloadClicked = true },
+            onDismiss = { dismissed = true },
+          )
+        }
+      }
+    }
+
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("update_available_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Update Available").assertIsDisplayed()
+    composeTestRule.onNodeWithText("v1.1.0 → v1.2.0").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Faster swipes and Studio square grids.").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("open_github_release_button").performClick()
+    assertEquals(true, downloadClicked)
+    composeTestRule.onNodeWithTag("update_dialog_later_button").performClick()
+    assertEquals(true, dismissed)
   }
 }

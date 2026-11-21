@@ -105,6 +105,8 @@ data class AlbumSummary(
     val name: String,
     val count: Int,
     val totalBytes: Long,
+    val remainingCount: Int = count,
+    val isCompleted: Boolean = false,
 )
 
 @Immutable

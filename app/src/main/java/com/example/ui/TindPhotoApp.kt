@@ -85,6 +85,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.R
+import com.example.data.GitHubReleaseInfo
 import com.example.model.SwipeDirection
 import com.example.ui.components.PermissionGateCard
 import com.example.ui.components.PhotoInfoBottomSheet
@@ -399,67 +400,110 @@ fun TindPhotoApp(
                 onTrash = { photo -> viewModel.swipePhoto(photo, SwipeDirection.LEFT_TRASH) },
             )
 
-            // GitHub Release Update Dialog
+            // GitHub Release Update Popup Modal
             val updateStatus = state.updateStatus
             if (state.showUpdateDialog && updateStatus is UpdateUiState.Available) {
-                val release = updateStatus.release
-                AlertDialog(
-                    onDismissRequest = { viewModel.setShowUpdateDialog(false) },
-                    title = { Text("Update Available: ${release.tagName}") },
-                    text = {
-                        Column(
-                            modifier = Modifier.verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text(
-                                text = "Current: v${state.currentVersionName} → Latest: ${release.tagName}",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = KeepEmerald,
-                            )
-                            if (release.notes.isNotBlank()) {
-                                Text(
-                                    text = release.notes,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            } else {
-                                Text(
-                                    text = "A newer build of SweepGallery is published on GitHub Releases.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
+                UpdateAvailableDialog(
+                    currentVersionName = state.currentVersionName,
+                    release = updateStatus.release,
+                    onDownload = {
+                        viewModel.setShowUpdateDialog(false)
+                        val targetUrl = updateStatus.release.apkDownloadUrl ?: updateStatus.release.htmlUrl
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
+                        runCatching { context.startActivity(intent) }
                     },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                viewModel.setShowUpdateDialog(false)
-                                val targetUrl = release.apkDownloadUrl ?: release.htmlUrl
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
-                                context.startActivity(intent)
-                            },
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = KeepEmerald,
-                                contentColor = Color(0xFF042619),
-                            ),
-                            modifier = Modifier.testTag("open_github_release_button"),
-                        ) {
-                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Download on GitHub")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { viewModel.setShowUpdateDialog(false) }) {
-                            Text("Later")
-                        }
-                    },
+                    onDismiss = viewModel::dismissUpdateDialog,
                 )
             }
         }
     }
+}
+
+@Composable
+fun UpdateAvailableDialog(
+    currentVersionName: String,
+    release: GitHubReleaseInfo,
+    onDownload: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag("update_available_dialog"),
+        icon = {
+            Icon(
+                imageVector = Icons.Rounded.SystemUpdate,
+                contentDescription = null,
+                tint = KeepEmerald,
+                modifier = Modifier.size(30.dp),
+            )
+        },
+        title = {
+            Text(
+                text = "Update Available",
+                style = MaterialTheme.typography.headlineSmall,
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = KeepEmerald.copy(alpha = 0.14f),
+                    border = BorderStroke(1.dp, KeepEmerald.copy(alpha = 0.4f)),
+                ) {
+                    Text(
+                        text = "v$currentVersionName → ${release.tagName}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = KeepEmerald,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
+                if (release.title.isNotBlank() && release.title != release.tagName) {
+                    Text(
+                        text = release.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Text(
+                    text = release.notes.ifBlank {
+                        "A newer build of SweepGallery is published on GitHub Releases."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDownload,
+                shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = KeepEmerald,
+                    contentColor = Color(0xFF042619),
+                ),
+                modifier = Modifier.testTag("open_github_release_button"),
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.OpenInNew,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(if (release.apkDownloadUrl != null) "Download APK" else "Download on GitHub")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("update_dialog_later_button"),
+            ) {
+                Text("Later")
+            }
+        },
+    )
 }
 
 @Composable

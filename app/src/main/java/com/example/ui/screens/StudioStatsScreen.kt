@@ -471,7 +471,11 @@ private fun MonthSquareTile(
                 }
 
                 Text(
-                    text = if (month.isCompleted) "Done" else "${month.remainingCount}",
+                    text = if (!month.isCompleted && month.remainingCount in 1 until month.totalCount) {
+                        "${month.remainingCount}/${month.totalCount}"
+                    } else {
+                        "${month.totalCount}"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = when {
@@ -492,9 +496,16 @@ private fun MonthSquareTile(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = formatFileSize(month.totalBytes),
+                    text = if (month.totalCount == 1) "1 photo" else "${month.totalCount} photos",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (month.isCompleted) KeepEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = formatFileSize(month.totalBytes),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -800,14 +811,18 @@ private fun AlbumSquareTile(
         onClick = onClick,
         modifier = modifier.testTag("album_row_${album.name}"),
         shape = MaterialTheme.shapes.medium,
-        color = if (isSelected) {
-            FlameCoral.copy(alpha = 0.12f)
-        } else {
-            MaterialTheme.colorScheme.surfaceContainer
+        color = when {
+            album.isCompleted -> KeepEmerald.copy(alpha = 0.09f)
+            isSelected -> FlameCoral.copy(alpha = 0.12f)
+            else -> MaterialTheme.colorScheme.surfaceContainer
         },
         border = BorderStroke(
             width = 1.dp,
-            color = if (isSelected) FlameCoral.copy(alpha = 0.55f) else MaterialTheme.colorScheme.outlineVariant,
+            color = when {
+                album.isCompleted -> KeepEmerald.copy(alpha = 0.45f)
+                isSelected -> FlameCoral.copy(alpha = 0.55f)
+                else -> MaterialTheme.colorScheme.outlineVariant
+            },
         ),
     ) {
         Column(
@@ -826,23 +841,43 @@ private fun AlbumSquareTile(
                         .size(28.dp)
                         .clip(CircleShape)
                         .background(
-                            if (isSelected) FlameCoral.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            when {
+                                album.isCompleted -> KeepEmerald.copy(alpha = 0.2f)
+                                isSelected -> FlameCoral.copy(alpha = 0.2f)
+                                else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.Folder,
-                        contentDescription = null,
-                        tint = if (isSelected) FlameCoral else MaterialTheme.colorScheme.onSurfaceVariant,
+                        imageVector = if (album.isCompleted) {
+                            Icons.Rounded.CheckCircle
+                        } else {
+                            Icons.Rounded.Folder
+                        },
+                        contentDescription = if (album.isCompleted) "Completed" else null,
+                        tint = when {
+                            album.isCompleted -> KeepEmerald
+                            isSelected -> FlameCoral
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                         modifier = Modifier.size(15.dp),
                     )
                 }
 
                 Text(
-                    text = album.count.toString(),
+                    text = if (!album.isCompleted && album.remainingCount in 1 until album.count) {
+                        "${album.remainingCount}/${album.count}"
+                    } else {
+                        "${album.count}"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
-                    color = if (isSelected) FlameCoral else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = when {
+                        album.isCompleted -> KeepEmerald
+                        isSelected -> FlameCoral
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     maxLines = 1,
                 )
             }
@@ -851,8 +886,15 @@ private fun AlbumSquareTile(
                 Text(
                     text = album.name,
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                    maxLines = 2,
+                    fontWeight = if (isSelected || album.isCompleted) FontWeight.Bold else FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = if (album.count == 1) "1 photo" else "${album.count} photos",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (album.isCompleted) KeepEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(

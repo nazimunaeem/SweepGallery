@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -56,10 +57,16 @@ private data class MonthBucket(
     val totalBytes: Long,
 )
 
+private data class AlbumBucket(
+    val name: String,
+    val photoIds: List<Long>,
+    val totalBytes: Long,
+)
+
 private data class BaseGalleryIndex(
     val allPhotosCount: Int = 0,
     val photosById: Map<Long, PhotoItem> = emptyMap(),
-    val albumSummaries: List<AlbumSummary> = emptyList(),
+    val albumBuckets: List<AlbumBucket> = emptyList(),
     val selectedAlbum: String = ALBUM_ALL,
     val sortedAlbumPhotos: List<PhotoItem> = emptyList(),
     val monthBuckets: List<MonthBucket> = emptyList(),
@@ -255,11 +262,11 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
             photosById[photo.id] = photo
         }
 
-        val albumSummaries = buildList {
+        val albumBuckets = buildList {
             add(
-                AlbumSummary(
+                AlbumBucket(
                     name = ALBUM_ALL,
-                    count = allPhotos.size,
+                    photoIds = allPhotos.map { it.id },
                     totalBytes = allPhotos.sumOf { it.sizeBytes },
                 ),
             )
@@ -269,9 +276,9 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
                 .sortedByDescending { it.value.size }
                 .forEach { (album, items) ->
                     add(
-                        AlbumSummary(
+                        AlbumBucket(
                             name = album,
-                            count = items.size,
+                            photoIds = items.map { it.id },
                             totalBytes = items.sumOf { it.sizeBytes },
                         ),
                     )
@@ -306,7 +313,7 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
         return BaseGalleryIndex(
             allPhotosCount = allPhotos.size,
             photosById = photosById,
-            albumSummaries = albumSummaries,
+            albumBuckets = albumBuckets,
             selectedAlbum = selectedAlbum,
             sortedAlbumPhotos = sortedAlbumPhotos,
             monthBuckets = monthBuckets,
@@ -388,6 +395,17 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
             it.key != MONTH_ALL && it.key != effectiveSelectedMonth && !it.isCompleted
         }
 
+        val albumSummaries = base.albumBuckets.map { bucket ->
+            val remaining = bucket.photoIds.count { it !in reviewedIds }
+            AlbumSummary(
+                name = bucket.name,
+                count = bucket.photoIds.size,
+                totalBytes = bucket.totalBytes,
+                remainingCount = remaining,
+                isCompleted = bucket.photoIds.isNotEmpty() && remaining == 0,
+            )
+        }
+
         return ComputedDeckData(
             allPhotosCount = base.allPhotosCount,
             deckPhotos = deckPhotos,
@@ -395,7 +413,7 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
             trashTotalBytes = trashPhotos.sumOf { it.sizeBytes },
             canUndo = swipe.canUndo,
             selectedAlbum = base.selectedAlbum,
-            albums = base.albumSummaries,
+            albums = albumSummaries,
             selectedMonth = effectiveSelectedMonth,
             months = monthSummaries,
             nextUnfinishedMonth = nextUnfinishedMonth,
@@ -718,6 +736,16 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
         overlayState.update { it.copy(showUpdateDialog = show) }
     }
 
+    fun dismissUpdateDialog() {
+        val currentStatus = uiState.value.updateStatus
+        overlayState.update { it.copy(showUpdateDialog = false) }
+        if (currentStatus is UpdateUiState.Available) {
+            viewModelScope.launch {
+                preferencesRepository.setDismissedPopupTag(currentStatus.release.tagName)
+            }
+        }
+    }
+
     private suspend fun checkForUpdatesInternal(silent: Boolean) {
         val repo = BuildConfig.GITHUB_REPO
         if (repo.isBlank()) {
@@ -736,12 +764,17 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
             )
         ) {
             is UpdateCheckResult.UpdateAvailable -> {
+                val dismissedPopupTag = runCatching {
+                    preferencesRepository.preferencesFlow.first().dismissedPopupTag
+                }.getOrDefault("")
+                val shouldOpenPopup = !silent || dismissedPopupTag != result.release.tagName
                 overlayState.update {
                     it.copy(
                         updateStatus = UpdateUiState.Available(
                             release = result.release,
                             bannerDismissed = false,
                         ),
+                        showUpdateDialog = shouldOpenPopup,
                     )
                 }
             }

@@ -24,6 +24,7 @@ data class PersistedPreferences(
     val sortOrder: SortOrder = SortOrder.NEWEST,
     val darkMode: Boolean = true,
     val dismissedUpdateTag: String = "",
+    val dismissedPopupTag: String = "",
 )
 
 class PreferencesRepository(private val context: Context) {
@@ -37,6 +38,7 @@ class PreferencesRepository(private val context: Context) {
         val SORT_ORDER = stringPreferencesKey("sort_order")
         val DARK_MODE = booleanPreferencesKey("dark_mode")
         val DISMISSED_UPDATE_TAG = stringPreferencesKey("dismissed_update_tag")
+        val DISMISSED_POPUP_TAG = stringPreferencesKey("dismissed_update_popup_tag")
     }
 
     val preferencesFlow: Flow<PersistedPreferences> = context.dataStore.data.map { prefs ->
@@ -59,6 +61,7 @@ class PreferencesRepository(private val context: Context) {
             sortOrder = sortOrder,
             darkMode = prefs[Keys.DARK_MODE] ?: true,
             dismissedUpdateTag = prefs[Keys.DISMISSED_UPDATE_TAG] ?: "",
+            dismissedPopupTag = prefs[Keys.DISMISSED_POPUP_TAG] ?: "",
         )
     }
 
@@ -122,6 +125,12 @@ class PreferencesRepository(private val context: Context) {
     suspend fun setDismissedUpdateTag(tag: String) {
         context.dataStore.edit { prefs ->
             prefs[Keys.DISMISSED_UPDATE_TAG] = tag
+        }
+    }
+
+    suspend fun setDismissedPopupTag(tag: String) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.DISMISSED_POPUP_TAG] = tag
         }
     }
 }

@@ -382,6 +382,18 @@ private fun FilterStrip(
                                         },
                                     )
                                 },
+                                trailingIcon = if (album.isCompleted) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Rounded.CheckCircle,
+                                            contentDescription = "Album completed",
+                                            tint = KeepEmerald,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
                                 onClick = {
                                     albumMenuExpanded = false
                                     onSelectAlbum(album.name)
@@ -418,7 +430,7 @@ private fun FilterStrip(
                 },
                 label = {
                     val suffix = when {
-                        isCompleted -> ""
+                        isCompleted -> " (${month.totalCount})"
                         month.key == MONTH_ALL -> " (${month.remainingCount})"
                         else -> " (${month.remainingCount}/${month.totalCount})"
                     }
