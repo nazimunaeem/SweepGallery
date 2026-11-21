@@ -65,6 +65,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -80,12 +81,18 @@ import coil.request.ImageRequest
 import com.example.R
 import com.example.model.PhotoItem
 import com.example.ui.theme.FlameCoral
-import com.example.ui.theme.FlameOrange
 import com.example.ui.theme.KeepEmerald
+import com.example.ui.theme.SweepLogoAccentDark
+import com.example.ui.theme.SweepLogoAccentLight
+import com.example.ui.theme.SweepLogoEnd
+import com.example.ui.theme.SweepLogoStart
 import com.example.ui.theme.TrashCrimson
+import com.example.ui.util.rememberSwipeHaptics
 
 @Composable
 fun TindPhotoLogo(modifier: Modifier = Modifier) {
+    val isDarkSurface = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val wordmarkAccent = if (isDarkSurface) SweepLogoAccentDark else SweepLogoAccentLight
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
@@ -97,7 +104,7 @@ fun TindPhotoLogo(modifier: Modifier = Modifier) {
                 .clip(RoundedCornerShape(10.dp))
                 .background(
                     Brush.linearGradient(
-                        colors = listOf(FlameCoral, FlameOrange),
+                        colors = listOf(SweepLogoStart, SweepLogoEnd),
                     ),
                 ),
             contentAlignment = Alignment.Center,
@@ -111,14 +118,14 @@ fun TindPhotoLogo(modifier: Modifier = Modifier) {
         }
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
-                text = "Tind",
+                text = "Sweep",
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onBackground,
             )
             Text(
-                text = "Photo",
+                text = "Gallery",
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = FlameCoral,
+                color = wordmarkAccent,
             )
         }
     }
@@ -127,7 +134,7 @@ fun TindPhotoLogo(modifier: Modifier = Modifier) {
 @Composable
 fun TindPhotoArtwork(
     modifier: Modifier = Modifier,
-    primaryColor: Color = FlameCoral,
+    primaryColor: Color = SweepLogoStart,
     secondaryColor: Color = KeepEmerald,
     cardSurface: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
 ) {
@@ -172,7 +179,7 @@ fun TindPhotoArtwork(
                 brush = Brush.linearGradient(
                     colors = listOf(
                         primaryColor.copy(alpha = 0.9f),
-                        FlameOrange.copy(alpha = 0.9f),
+                        SweepLogoEnd.copy(alpha = 0.9f),
                     ),
                     start = rightTop,
                     end = Offset(rightTop.x + cardW, rightTop.y + cardH),
@@ -301,6 +308,15 @@ fun PhotoLightboxOverlay(
             var scale by remember(photo.id) { mutableFloatStateOf(1f) }
             var offset by remember(photo.id) { mutableStateOf(Offset.Zero) }
             val context = LocalContext.current
+            val swipeHaptics = rememberSwipeHaptics()
+
+            val lightboxRequest = remember(photo.id, context) {
+                ImageRequest.Builder(context)
+                    .data(photo.uri)
+                    .size(2048, 2048)
+                    .crossfade(false)
+                    .build()
+            }
 
             Box(
                 modifier = Modifier
@@ -308,10 +324,7 @@ fun PhotoLightboxOverlay(
                     .background(Color.Black.copy(alpha = 0.96f)),
             ) {
                 AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(photo.uri)
-                        .crossfade(true)
-                        .build(),
+                    model = lightboxRequest,
                     contentDescription = photo.displayName,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
@@ -397,7 +410,10 @@ fun PhotoLightboxOverlay(
                     horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
                 ) {
                     Button(
-                        onClick = { onTrash(photo) },
+                        onClick = {
+                            swipeHaptics.onDeleteCommitted()
+                            onTrash(photo)
+                        },
                         modifier = Modifier
                             .weight(1f)
                             .height(52.dp)
@@ -413,7 +429,10 @@ fun PhotoLightboxOverlay(
                         Text("Delete")
                     }
                     Button(
-                        onClick = { onKeep(photo) },
+                        onClick = {
+                            swipeHaptics.onKeepCommitted()
+                            onKeep(photo)
+                        },
                         modifier = Modifier
                             .weight(1f)
                             .height(52.dp)
@@ -445,6 +464,7 @@ fun PhotoInfoBottomSheet(
 ) {
     if (photo == null) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val swipeHaptics = rememberSwipeHaptics()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -527,7 +547,10 @@ fun PhotoInfoBottomSheet(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Button(
-                    onClick = { onTrash(photo) },
+                    onClick = {
+                        swipeHaptics.onDeleteCommitted()
+                        onTrash(photo)
+                    },
                     modifier = Modifier
                         .weight(1f)
                         .height(50.dp)
@@ -543,7 +566,10 @@ fun PhotoInfoBottomSheet(
                     Text("Trash")
                 }
                 Button(
-                    onClick = { onKeep(photo) },
+                    onClick = {
+                        swipeHaptics.onKeepCommitted()
+                        onKeep(photo)
+                    },
                     modifier = Modifier
                         .weight(1f)
                         .height(50.dp)

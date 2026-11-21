@@ -1,10 +1,10 @@
 <resources>
-    <string name="app_name">TindPhoto</string>
+    <string name="app_name">SweepGallery</string>
     <string name="nav_swipe">Swipe</string>
     <string name="nav_trash">Trash</string>
     <string name="nav_stats">Studio</string>
     <string name="permission_title">Ready to declutter your gallery?</string>
-    <string name="permission_body">TindPhoto stays 100% on your device. Grant photo access to swipe right to keep memories or swipe left to queue clutter for deletion.</string>
+    <string name="permission_body">SweepGallery stays 100% on your device. Grant photo access to swipe right to keep memories or swipe left to queue clutter for deletion.</string>
     <string name="grant_access">Grant Photo Access</string>
     <string name="open_settings">Open Settings</string>
     <string name="stamp_keep">KEEP</string>

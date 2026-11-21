@@ -38,10 +38,10 @@ class ExampleUnitTest {
 
     @Test
     fun githubUpdateChecker_normalizesRepoSlug() {
-        assertEquals("nazim/TindPhoto", GitHubUpdateChecker.normalizeRepoSlug("nazim/TindPhoto"))
+        assertEquals("nazim/SweepGallery", GitHubUpdateChecker.normalizeRepoSlug("nazim/SweepGallery"))
         assertEquals(
-            "nazim/TindPhoto",
-            GitHubUpdateChecker.normalizeRepoSlug("https://github.com/nazim/TindPhoto.git"),
+            "nazim/SweepGallery",
+            GitHubUpdateChecker.normalizeRepoSlug("https://github.com/nazim/SweepGallery.git"),
         )
         assertEquals("", GitHubUpdateChecker.normalizeRepoSlug("invalid-repo"))
     }

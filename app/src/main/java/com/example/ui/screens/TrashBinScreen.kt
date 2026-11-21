@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,11 +51,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import coil.size.Precision
 import com.example.R
 import com.example.model.PhotoItem
 import com.example.model.formatFileSize
 import com.example.ui.theme.KeepEmerald
 import com.example.ui.theme.TrashCrimson
+import com.example.ui.util.rememberSwipeHaptics
 import com.example.ui.viewmodel.TindPhotoUiState
 
 @Composable
@@ -67,6 +70,7 @@ fun TrashBinScreen(
     onGoToSwipe: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val swipeHaptics = rememberSwipeHaptics()
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -204,7 +208,10 @@ fun TrashBinScreen(
                 shadowElevation = 8.dp,
             ) {
                 Button(
-                    onClick = onDeleteAllConfirmed,
+                    onClick = {
+                        swipeHaptics.onDeleteCommitted()
+                        onDeleteAllConfirmed()
+                    },
                     enabled = !state.isDeleting,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -244,6 +251,15 @@ private fun TrashGridTile(
     onRestore: () -> Unit,
 ) {
     val context = LocalContext.current
+    val thumbnailRequest = remember(photo.id, context) {
+        ImageRequest.Builder(context)
+            .data(photo.uri)
+            .size(420, 420)
+            .precision(Precision.INEXACT)
+            .memoryCacheKey("thumb_${photo.id}")
+            .crossfade(false)
+            .build()
+    }
     Box(
         modifier = Modifier
             .aspectRatio(0.85f)
@@ -253,10 +269,7 @@ private fun TrashGridTile(
             .testTag("trash_tile_${photo.id}"),
     ) {
         AsyncImage(
-            model = ImageRequest.Builder(context)
-                .data(photo.uri)
-                .crossfade(true)
-                .build(),
+            model = thumbnailRequest,
             contentDescription = photo.displayName,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),

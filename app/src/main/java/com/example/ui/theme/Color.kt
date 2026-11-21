@@ -8,6 +8,12 @@ val FlameOrange = Color(0xFFFF7A45)
 val FlameContainerDark = Color(0xFF4A1824)
 val FlameContainerLight = Color(0xFFFFE5E9)
 
+// SweepGallery Logo Palette (Electric Indigo -> Vivid Cyan)
+val SweepLogoStart = Color(0xFF4F46E5)
+val SweepLogoEnd = Color(0xFF06B6D4)
+val SweepLogoAccentDark = Color(0xFF22D3EE)
+val SweepLogoAccentLight = Color(0xFF0284C7)
+
 val KeepEmerald = Color(0xFF10D68E)
 val KeepEmeraldDark = Color(0xFF0B3B2A)
 val KeepEmeraldLight = Color(0xFFD5F9EA)

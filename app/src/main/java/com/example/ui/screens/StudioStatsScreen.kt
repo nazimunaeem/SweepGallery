@@ -25,23 +25,19 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteSweep
-import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.SystemUpdate
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -50,10 +46,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -86,7 +78,6 @@ fun StudioStatsScreen(
     onResetKeptHistory: () -> Unit,
     onSeedSamples: () -> Unit,
     onCheckForUpdates: () -> Unit,
-    onSaveGithubRepo: (String) -> Unit,
     onOpenUpdateDialog: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -141,12 +132,11 @@ fun StudioStatsScreen(
             )
         }
 
-        // GitHub App Updates Card
+        // App Updates Card
         item {
             AppUpdatesCard(
                 state = state,
                 onCheckForUpdates = onCheckForUpdates,
-                onSaveGithubRepo = onSaveGithubRepo,
                 onOpenUpdateDialog = onOpenUpdateDialog,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -662,12 +652,9 @@ private fun AlbumRowCard(
 private fun AppUpdatesCard(
     state: TindPhotoUiState,
     onCheckForUpdates: () -> Unit,
-    onSaveGithubRepo: (String) -> Unit,
     onOpenUpdateDialog: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showRepoDialog by remember { mutableStateOf(false) }
-
     Surface(
         modifier = modifier,
         shape = MaterialTheme.shapes.large,
@@ -681,51 +668,25 @@ private fun AppUpdatesCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.SystemUpdate,
-                        contentDescription = null,
-                        tint = FlameCoral,
+                Icon(
+                    imageVector = Icons.Rounded.SystemUpdate,
+                    contentDescription = null,
+                    tint = FlameCoral,
+                )
+                Column {
+                    Text(
+                        text = "App Updates",
+                        style = MaterialTheme.typography.titleMedium,
                     )
-                    Column {
-                        Text(
-                            text = "App Updates",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            text = "Installed: v${state.currentVersionName} (${state.currentVersionCode})",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-
-                IconButton(
-                    onClick = { showRepoDialog = true },
-                    modifier = Modifier.testTag("edit_github_repo_button"),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Edit,
-                        contentDescription = "Configure GitHub repository",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Text(
+                        text = "Installed: v${state.currentVersionName} (${state.currentVersionCode})",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-
-            Text(
-                text = if (state.githubRepo.isNotBlank()) {
-                    "GitHub: ${state.githubRepo}"
-                } else {
-                    "GitHub repo not set — tap edit to enter owner/repo"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
 
             when (val status = state.updateStatus) {
                 is UpdateUiState.Available -> {
@@ -755,7 +716,7 @@ private fun AppUpdatesCard(
                             color = FlameCoral,
                         )
                         Text(
-                            text = "Checking GitHub Releases…",
+                            text = "Checking for updates…",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -766,7 +727,7 @@ private fun AppUpdatesCard(
                         text = if (status.latestTag != null) {
                             "You are on the latest version (${status.latestTag})"
                         } else {
-                            "No releases published yet on GitHub"
+                            "No newer releases available"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = KeepEmerald,
@@ -783,13 +744,7 @@ private fun AppUpdatesCard(
             }
 
             OutlinedButton(
-                onClick = {
-                    if (state.githubRepo.isBlank()) {
-                        showRepoDialog = true
-                    } else {
-                        onCheckForUpdates()
-                    }
-                },
+                onClick = onCheckForUpdates,
                 enabled = state.updateStatus !is UpdateUiState.Checking,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -797,53 +752,8 @@ private fun AppUpdatesCard(
                     .testTag("check_updates_button"),
                 shape = CircleShape,
             ) {
-                Text(
-                    if (state.githubRepo.isBlank()) "Set GitHub Repository" else "Check for Updates",
-                )
+                Text("Check for Updates")
             }
         }
-    }
-
-    if (showRepoDialog) {
-        var repoDraft by remember(state.githubRepo) { mutableStateOf(state.githubRepo) }
-        AlertDialog(
-            onDismissRequest = { showRepoDialog = false },
-            title = { Text("GitHub Repository") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Enter your GitHub repository (owner/repo) to check for new APK releases.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedTextField(
-                        value = repoDraft,
-                        onValueChange = { repoDraft = it },
-                        singleLine = true,
-                        label = { Text("owner/repo") },
-                        placeholder = { Text("username/TindPhoto") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("github_repo_input"),
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showRepoDialog = false
-                        onSaveGithubRepo(repoDraft)
-                    },
-                    modifier = Modifier.testTag("save_github_repo_button"),
-                ) {
-                    Text("Save & Check")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRepoDialog = false }) {
-                    Text("Cancel")
-                }
-            },
-        )
     }
 }

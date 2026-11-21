@@ -1,6 +1,6 @@
 {
-  "name": "TindPhoto",
-  "description": "Swipe through your device gallery like Tinder to keep favorite photos or queue unwanted clutter for quick batch deletion.",
+  "name": "SweepGallery",
+  "description": "Swipe through your device gallery to keep favorite photos or queue unwanted clutter for quick batch deletion.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

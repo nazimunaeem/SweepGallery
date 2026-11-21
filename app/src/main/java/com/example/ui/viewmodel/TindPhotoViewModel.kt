@@ -2,6 +2,7 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.IntentSender
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
@@ -21,11 +22,14 @@ import com.example.model.SwipeDirection
 import com.example.model.SwipeRecord
 import com.example.model.TindPhotoStats
 import com.example.model.formatFileSize
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -44,17 +48,57 @@ sealed interface UpdateUiState {
     data class Error(val message: String) : UpdateUiState
 }
 
-private data class SessionState(
-    val hasPermission: Boolean = false,
-    val isLoading: Boolean = false,
-    val isSeeding: Boolean = false,
-    val isDeleting: Boolean = false,
+private data class MonthBucket(
+    val key: String,
+    val label: String,
+    val photoIds: List<Long>,
+    val totalBytes: Long,
+)
+
+private data class BaseGalleryIndex(
+    val allPhotosCount: Int = 0,
+    val photosById: Map<Long, PhotoItem> = emptyMap(),
+    val albumSummaries: List<AlbumSummary> = emptyList(),
+    val selectedAlbum: String = ALBUM_ALL,
+    val sortedAlbumPhotos: List<PhotoItem> = emptyList(),
+    val monthBuckets: List<MonthBucket> = emptyList(),
+    val albumTotalBytes: Long = 0L,
+)
+
+private data class GalleryFilterState(
     val allPhotos: List<PhotoItem> = emptyList(),
     val trashQueueIds: List<Long> = emptyList(),
     val sessionKeptIds: Set<Long> = emptySet(),
     val undoStack: List<SwipeRecord> = emptyList(),
     val selectedAlbum: String = ALBUM_ALL,
     val selectedMonth: String = MONTH_ALL,
+)
+
+private data class SwipeSelectionState(
+    val trashQueueIds: List<Long>,
+    val sessionKeptIds: Set<Long>,
+    val canUndo: Boolean,
+    val selectedMonth: String,
+)
+
+private data class ComputedDeckData(
+    val allPhotosCount: Int = 0,
+    val deckPhotos: List<PhotoItem> = emptyList(),
+    val trashQueue: List<PhotoItem> = emptyList(),
+    val trashTotalBytes: Long = 0L,
+    val canUndo: Boolean = false,
+    val selectedAlbum: String = ALBUM_ALL,
+    val albums: List<AlbumSummary> = emptyList(),
+    val selectedMonth: String = MONTH_ALL,
+    val months: List<MonthSummary> = emptyList(),
+    val nextUnfinishedMonth: MonthSummary? = null,
+)
+
+private data class OverlayAndStatusState(
+    val hasPermission: Boolean = false,
+    val isLoading: Boolean = false,
+    val isSeeding: Boolean = false,
+    val isDeleting: Boolean = false,
     val inspectingPhoto: PhotoItem? = null,
     val lightboxPhoto: PhotoItem? = null,
     val pendingDeleteSender: IntentSender? = null,
@@ -64,6 +108,7 @@ private data class SessionState(
     val showUpdateDialog: Boolean = false,
 )
 
+@Immutable
 data class TindPhotoUiState(
     val hasPermission: Boolean = false,
     val isLoading: Boolean = false,
@@ -89,7 +134,6 @@ data class TindPhotoUiState(
     val snackbarMessage: String? = null,
     val currentVersionName: String = BuildConfig.VERSION_NAME,
     val currentVersionCode: Int = BuildConfig.VERSION_CODE,
-    val githubRepo: String = BuildConfig.GITHUB_REPO,
     val updateStatus: UpdateUiState = UpdateUiState.Idle,
     val showUpdateDialog: Boolean = false,
 )
@@ -100,13 +144,90 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
     private val preferencesRepository = PreferencesRepository(application)
     private val samplePhotoSeeder = SamplePhotoSeeder(application)
 
-    private val sessionState = MutableStateFlow(SessionState())
+    private val galleryFilterState = MutableStateFlow(GalleryFilterState())
+    private val overlayState = MutableStateFlow(OverlayAndStatusState())
+
+    private val baseGalleryFlow = combine(
+        galleryFilterState
+            .map { it.allPhotos to it.selectedAlbum }
+            .distinctUntilChanged(),
+        preferencesRepository.preferencesFlow
+            .map { it.sortOrder }
+            .distinctUntilChanged(),
+    ) { (allPhotos, selectedAlbum), sortOrder ->
+        buildBaseGalleryIndex(
+            allPhotos = allPhotos,
+            selectedAlbum = selectedAlbum,
+            sortOrder = sortOrder,
+        )
+    }.flowOn(Dispatchers.Default)
+
+    private val swipeSelectionFlow = galleryFilterState
+        .map {
+            SwipeSelectionState(
+                trashQueueIds = it.trashQueueIds,
+                sessionKeptIds = it.sessionKeptIds,
+                canUndo = it.undoStack.isNotEmpty(),
+                selectedMonth = it.selectedMonth,
+            )
+        }
+        .distinctUntilChanged()
+
+    private val deckComputationFlow = combine(
+        baseGalleryFlow,
+        swipeSelectionFlow,
+        preferencesRepository.preferencesFlow
+            .map { it.keptPhotoIds to it.includeReviewed }
+            .distinctUntilChanged(),
+    ) { base, swipeSelection, (keptPhotoIds, includeReviewed) ->
+        computeDeckData(
+            base = base,
+            swipe = swipeSelection,
+            keptPhotoIds = keptPhotoIds,
+            includeReviewed = includeReviewed,
+        )
+    }.distinctUntilChanged()
 
     val uiState: StateFlow<TindPhotoUiState> = combine(
-        sessionState,
+        deckComputationFlow,
+        overlayState,
         preferencesRepository.preferencesFlow,
-    ) { session, prefs ->
-        buildUiState(session, prefs)
+    ) { deck, overlay, prefs ->
+        val resolvedUpdateStatus = when (val raw = overlay.updateStatus) {
+            is UpdateUiState.Available -> raw.copy(
+                bannerDismissed = prefs.dismissedUpdateTag == raw.release.tagName,
+            )
+            else -> raw
+        }
+
+        TindPhotoUiState(
+            hasPermission = overlay.hasPermission,
+            isLoading = overlay.isLoading,
+            isSeeding = overlay.isSeeding,
+            isDeleting = overlay.isDeleting,
+            allPhotosCount = deck.allPhotosCount,
+            deckPhotos = deck.deckPhotos,
+            trashQueue = deck.trashQueue,
+            trashTotalBytes = deck.trashTotalBytes,
+            canUndo = deck.canUndo,
+            selectedAlbum = deck.selectedAlbum,
+            albums = deck.albums,
+            selectedMonth = deck.selectedMonth,
+            months = deck.months,
+            nextUnfinishedMonth = deck.nextUnfinishedMonth,
+            sortOrder = prefs.sortOrder,
+            includeReviewed = prefs.includeReviewed,
+            darkMode = prefs.darkMode,
+            stats = prefs.stats,
+            inspectingPhoto = overlay.inspectingPhoto,
+            lightboxPhoto = overlay.lightboxPhoto,
+            pendingDeleteSender = overlay.pendingDeleteSender,
+            snackbarMessage = overlay.snackbarMessage,
+            currentVersionName = BuildConfig.VERSION_NAME,
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            updateStatus = resolvedUpdateStatus,
+            showUpdateDialog = overlay.showUpdateDialog,
+        )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -114,114 +235,34 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
     )
 
     init {
-        viewModelScope.launch {
-            val prefs = preferencesRepository.preferencesFlow.first()
-            val repo = prefs.customGithubRepo.ifBlank { BuildConfig.GITHUB_REPO }
-            if (repo.isNotBlank()) {
-                checkForUpdatesInternal(repo = repo, silent = true)
+        if (BuildConfig.GITHUB_REPO.isNotBlank()) {
+            viewModelScope.launch {
+                checkForUpdatesInternal(silent = true)
             }
         }
     }
 
-    private fun buildUiState(
-        session: SessionState,
-        prefs: PersistedPreferences,
-    ): TindPhotoUiState {
-        val photosById = session.allPhotos.associateBy { it.id }
-        val trashSet = session.trashQueueIds.toSet()
-        val trashPhotos = session.trashQueueIds.mapNotNull { photosById[it] }
+    private fun buildBaseGalleryIndex(
+        allPhotos: List<PhotoItem>,
+        selectedAlbum: String,
+        sortOrder: SortOrder,
+    ): BaseGalleryIndex {
+        if (allPhotos.isEmpty()) return BaseGalleryIndex(selectedAlbum = selectedAlbum)
 
-        val reviewedIds = buildSet {
-            addAll(trashSet)
-            addAll(session.sessionKeptIds)
-            addAll(prefs.keptPhotoIds)
-        }
-
-        val excludedFromDeckIds = buildSet {
-            addAll(trashSet)
-            addAll(session.sessionKeptIds)
-            if (!prefs.includeReviewed) {
-                addAll(prefs.keptPhotoIds)
-            }
-        }
-
-        val albumFiltered = if (session.selectedAlbum == ALBUM_ALL) {
-            session.allPhotos
-        } else {
-            session.allPhotos.filter { it.albumName == session.selectedAlbum }
-        }
-
-        // Build month summaries from the active album selection
-        val monthSummaries = buildList {
-            if (albumFiltered.isNotEmpty()) {
-                val allRemaining = albumFiltered.count { it.id !in reviewedIds }
-                add(
-                    MonthSummary(
-                        key = MONTH_ALL,
-                        label = "All Months",
-                        totalCount = albumFiltered.size,
-                        remainingCount = allRemaining,
-                        totalBytes = albumFiltered.sumOf { it.sizeBytes },
-                        isCompleted = allRemaining == 0,
-                    ),
-                )
-            }
-
-            albumFiltered
-                .groupBy { it.monthKey }
-                .entries
-                .sortedByDescending { it.key }
-                .forEach { (monthKey, items) ->
-                    val remaining = items.count { it.id !in reviewedIds }
-                    add(
-                        MonthSummary(
-                            key = monthKey,
-                            label = items.first().monthLabel,
-                            totalCount = items.size,
-                            remainingCount = remaining,
-                            totalBytes = items.sumOf { it.sizeBytes },
-                            isCompleted = items.isNotEmpty() && remaining == 0,
-                        ),
-                    )
-                }
-        }
-
-        val effectiveSelectedMonth = if (
-            session.selectedMonth == MONTH_ALL ||
-            monthSummaries.any { it.key == session.selectedMonth }
-        ) {
-            session.selectedMonth
-        } else {
-            MONTH_ALL
-        }
-
-        val monthFiltered = if (effectiveSelectedMonth == MONTH_ALL) {
-            albumFiltered
-        } else {
-            albumFiltered.filter { it.monthKey == effectiveSelectedMonth }
-        }
-
-        val sortedFiltered = when (prefs.sortOrder) {
-            SortOrder.NEWEST -> monthFiltered.sortedByDescending { it.effectiveDateMillis }
-            SortOrder.OLDEST -> monthFiltered.sortedBy { it.effectiveDateMillis }
-            SortOrder.LARGEST -> monthFiltered.sortedByDescending { it.sizeBytes }
-        }
-
-        val deckPhotos = sortedFiltered.filter { it.id !in excludedFromDeckIds }
-
-        val nextUnfinishedMonth = monthSummaries.firstOrNull {
-            it.key != MONTH_ALL && it.key != effectiveSelectedMonth && !it.isCompleted
+        val photosById = HashMap<Long, PhotoItem>(allPhotos.size)
+        for (photo in allPhotos) {
+            photosById[photo.id] = photo
         }
 
         val albumSummaries = buildList {
             add(
                 AlbumSummary(
                     name = ALBUM_ALL,
-                    count = session.allPhotos.size,
-                    totalBytes = session.allPhotos.sumOf { it.sizeBytes },
+                    count = allPhotos.size,
+                    totalBytes = allPhotos.sumOf { it.sizeBytes },
                 ),
             )
-            session.allPhotos
+            allPhotos
                 .groupBy { it.albumName }
                 .entries
                 .sortedByDescending { it.value.size }
@@ -236,78 +277,163 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
                 }
         }
 
-        val effectiveRepo = prefs.customGithubRepo.ifBlank { BuildConfig.GITHUB_REPO }
-        val resolvedUpdateStatus = when (val raw = session.updateStatus) {
-            is UpdateUiState.Available -> raw.copy(
-                bannerDismissed = prefs.dismissedUpdateTag == raw.release.tagName,
-            )
-            else -> raw
+        val albumFiltered = if (selectedAlbum == ALBUM_ALL) {
+            allPhotos
+        } else {
+            allPhotos.filter { it.albumName == selectedAlbum }
         }
 
-        return TindPhotoUiState(
-            hasPermission = session.hasPermission,
-            isLoading = session.isLoading,
-            isSeeding = session.isSeeding,
-            isDeleting = session.isDeleting,
-            allPhotosCount = session.allPhotos.size,
+        val sortedAlbumPhotos = when (sortOrder) {
+            SortOrder.NEWEST -> albumFiltered.sortedByDescending { it.effectiveDateMillis }
+            SortOrder.OLDEST -> albumFiltered.sortedBy { it.effectiveDateMillis }
+            SortOrder.LARGEST -> albumFiltered.sortedByDescending { it.sizeBytes }
+        }
+
+        val monthBuckets = albumFiltered
+            .groupBy { it.monthKey }
+            .entries
+            .sortedByDescending { it.key }
+            .map { (monthKey, items) ->
+                MonthBucket(
+                    key = monthKey,
+                    label = items.first().monthLabel,
+                    photoIds = items.map { it.id },
+                    totalBytes = items.sumOf { it.sizeBytes },
+                )
+            }
+
+        return BaseGalleryIndex(
+            allPhotosCount = allPhotos.size,
+            photosById = photosById,
+            albumSummaries = albumSummaries,
+            selectedAlbum = selectedAlbum,
+            sortedAlbumPhotos = sortedAlbumPhotos,
+            monthBuckets = monthBuckets,
+            albumTotalBytes = albumFiltered.sumOf { it.sizeBytes },
+        )
+    }
+
+    private fun computeDeckData(
+        base: BaseGalleryIndex,
+        swipe: SwipeSelectionState,
+        keptPhotoIds: Set<Long>,
+        includeReviewed: Boolean,
+    ): ComputedDeckData {
+        val trashSet = swipe.trashQueueIds.toHashSet()
+        val trashPhotos = swipe.trashQueueIds.mapNotNull { base.photosById[it] }
+
+        val reviewedIds = HashSet<Long>(trashSet.size + swipe.sessionKeptIds.size + keptPhotoIds.size).apply {
+            addAll(trashSet)
+            addAll(swipe.sessionKeptIds)
+            addAll(keptPhotoIds)
+        }
+
+        val excludedFromDeckIds = HashSet<Long>(trashSet.size + swipe.sessionKeptIds.size + keptPhotoIds.size).apply {
+            addAll(trashSet)
+            addAll(swipe.sessionKeptIds)
+            if (!includeReviewed) {
+                addAll(keptPhotoIds)
+            }
+        }
+
+        val monthSummaries = buildList {
+            if (base.sortedAlbumPhotos.isNotEmpty()) {
+                val allRemaining = base.sortedAlbumPhotos.count { it.id !in reviewedIds }
+                add(
+                    MonthSummary(
+                        key = MONTH_ALL,
+                        label = "All Months",
+                        totalCount = base.sortedAlbumPhotos.size,
+                        remainingCount = allRemaining,
+                        totalBytes = base.albumTotalBytes,
+                        isCompleted = allRemaining == 0,
+                    ),
+                )
+            }
+
+            base.monthBuckets.forEach { bucket ->
+                val remaining = bucket.photoIds.count { it !in reviewedIds }
+                add(
+                    MonthSummary(
+                        key = bucket.key,
+                        label = bucket.label,
+                        totalCount = bucket.photoIds.size,
+                        remainingCount = remaining,
+                        totalBytes = bucket.totalBytes,
+                        isCompleted = bucket.photoIds.isNotEmpty() && remaining == 0,
+                    ),
+                )
+            }
+        }
+
+        val effectiveSelectedMonth = if (
+            swipe.selectedMonth == MONTH_ALL ||
+            monthSummaries.any { it.key == swipe.selectedMonth }
+        ) {
+            swipe.selectedMonth
+        } else {
+            MONTH_ALL
+        }
+
+        val deckPhotos = if (effectiveSelectedMonth == MONTH_ALL) {
+            base.sortedAlbumPhotos.filter { it.id !in excludedFromDeckIds }
+        } else {
+            base.sortedAlbumPhotos.filter {
+                it.monthKey == effectiveSelectedMonth && it.id !in excludedFromDeckIds
+            }
+        }
+
+        val nextUnfinishedMonth = monthSummaries.firstOrNull {
+            it.key != MONTH_ALL && it.key != effectiveSelectedMonth && !it.isCompleted
+        }
+
+        return ComputedDeckData(
+            allPhotosCount = base.allPhotosCount,
             deckPhotos = deckPhotos,
             trashQueue = trashPhotos,
             trashTotalBytes = trashPhotos.sumOf { it.sizeBytes },
-            canUndo = session.undoStack.isNotEmpty(),
-            selectedAlbum = session.selectedAlbum,
-            albums = albumSummaries,
+            canUndo = swipe.canUndo,
+            selectedAlbum = base.selectedAlbum,
+            albums = base.albumSummaries,
             selectedMonth = effectiveSelectedMonth,
             months = monthSummaries,
             nextUnfinishedMonth = nextUnfinishedMonth,
-            sortOrder = prefs.sortOrder,
-            includeReviewed = prefs.includeReviewed,
-            darkMode = prefs.darkMode,
-            stats = prefs.stats,
-            inspectingPhoto = session.inspectingPhoto,
-            lightboxPhoto = session.lightboxPhoto,
-            pendingDeleteSender = session.pendingDeleteSender,
-            snackbarMessage = session.snackbarMessage,
-            currentVersionName = BuildConfig.VERSION_NAME,
-            currentVersionCode = BuildConfig.VERSION_CODE,
-            githubRepo = effectiveRepo,
-            updateStatus = resolvedUpdateStatus,
-            showUpdateDialog = session.showUpdateDialog,
         )
     }
 
     fun onPermissionUpdated(granted: Boolean) {
-        val previouslyGranted = sessionState.value.hasPermission
-        sessionState.update { it.copy(hasPermission = granted) }
-        if (granted && (!previouslyGranted || sessionState.value.allPhotos.isEmpty())) {
+        val previouslyGranted = overlayState.value.hasPermission
+        overlayState.update { it.copy(hasPermission = granted) }
+        if (granted && (!previouslyGranted || galleryFilterState.value.allPhotos.isEmpty())) {
             refreshGallery()
         }
     }
 
     fun refreshGallery() {
         viewModelScope.launch {
-            sessionState.update { it.copy(isLoading = true) }
+            overlayState.update { it.copy(isLoading = true) }
             val loaded = galleryRepository.loadDevicePhotos()
             val validIds = loaded.map { it.id }.toSet()
-            sessionState.update { current ->
+            galleryFilterState.update { current ->
                 current.copy(
-                    isLoading = false,
                     allPhotos = loaded,
                     trashQueueIds = current.trashQueueIds.filter { it in validIds },
                     sessionKeptIds = current.sessionKeptIds.filter { it in validIds }.toSet(),
                 )
             }
+            overlayState.update { it.copy(isLoading = false) }
         }
     }
 
     fun seedSamplePhotos() {
         viewModelScope.launch {
-            sessionState.update { it.copy(isSeeding = true) }
+            overlayState.update { it.copy(isSeeding = true) }
             val count = samplePhotoSeeder.seedSamplePhotos()
             val loaded = galleryRepository.loadDevicePhotos()
-            sessionState.update {
+            galleryFilterState.update { it.copy(allPhotos = loaded) }
+            overlayState.update {
                 it.copy(
                     isSeeding = false,
-                    allPhotos = loaded,
                     snackbarMessage = if (count > 0) {
                         "Added $count sample photos across 3 months"
                     } else {
@@ -319,91 +445,93 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun swipePhoto(photo: PhotoItem, direction: SwipeDirection) {
-        viewModelScope.launch {
-            when (direction) {
-                SwipeDirection.RIGHT_KEEP -> {
-                    preferencesRepository.markPhotoKept(photo.id)
-                    sessionState.update { current ->
-                        current.copy(
-                            sessionKeptIds = current.sessionKeptIds + photo.id,
-                            undoStack = current.undoStack + SwipeRecord(photo, direction),
-                            lightboxPhoto = if (current.lightboxPhoto?.id == photo.id) null else current.lightboxPhoto,
-                            inspectingPhoto = if (current.inspectingPhoto?.id == photo.id) null else current.inspectingPhoto,
-                        )
-                    }
+        when (direction) {
+            SwipeDirection.RIGHT_KEEP -> {
+                galleryFilterState.update { current ->
+                    current.copy(
+                        sessionKeptIds = current.sessionKeptIds + photo.id,
+                        undoStack = current.undoStack + SwipeRecord(photo, direction),
+                    )
                 }
-                SwipeDirection.LEFT_TRASH -> {
-                    sessionState.update { current ->
-                        val updatedTrash = if (photo.id in current.trashQueueIds) {
-                            current.trashQueueIds
-                        } else {
-                            listOf(photo.id) + current.trashQueueIds
-                        }
-                        current.copy(
-                            trashQueueIds = updatedTrash,
-                            undoStack = current.undoStack + SwipeRecord(photo, direction),
-                            lightboxPhoto = if (current.lightboxPhoto?.id == photo.id) null else current.lightboxPhoto,
-                            inspectingPhoto = if (current.inspectingPhoto?.id == photo.id) null else current.inspectingPhoto,
-                        )
-                    }
+                viewModelScope.launch {
+                    preferencesRepository.markPhotoKept(photo.id)
                 }
             }
+            SwipeDirection.LEFT_TRASH -> {
+                galleryFilterState.update { current ->
+                    val updatedTrash = if (photo.id in current.trashQueueIds) {
+                        current.trashQueueIds
+                    } else {
+                        listOf(photo.id) + current.trashQueueIds
+                    }
+                    current.copy(
+                        trashQueueIds = updatedTrash,
+                        undoStack = current.undoStack + SwipeRecord(photo, direction),
+                    )
+                }
+            }
+        }
+        overlayState.update { current ->
+            current.copy(
+                lightboxPhoto = if (current.lightboxPhoto?.id == photo.id) null else current.lightboxPhoto,
+                inspectingPhoto = if (current.inspectingPhoto?.id == photo.id) null else current.inspectingPhoto,
+            )
         }
     }
 
     fun undoLastSwipe() {
-        val lastRecord = sessionState.value.undoStack.lastOrNull() ?: return
-        viewModelScope.launch {
-            if (lastRecord.direction == SwipeDirection.RIGHT_KEEP) {
+        val lastRecord = galleryFilterState.value.undoStack.lastOrNull() ?: return
+        galleryFilterState.update { current ->
+            current.copy(
+                undoStack = current.undoStack.dropLast(1),
+                trashQueueIds = current.trashQueueIds.filterNot { it == lastRecord.photo.id },
+                sessionKeptIds = current.sessionKeptIds - lastRecord.photo.id,
+                selectedAlbum = if (
+                    current.selectedAlbum != ALBUM_ALL &&
+                    current.selectedAlbum != lastRecord.photo.albumName
+                ) {
+                    lastRecord.photo.albumName
+                } else {
+                    current.selectedAlbum
+                },
+                selectedMonth = if (
+                    current.selectedMonth != MONTH_ALL &&
+                    current.selectedMonth != lastRecord.photo.monthKey
+                ) {
+                    lastRecord.photo.monthKey
+                } else {
+                    current.selectedMonth
+                },
+            )
+        }
+        if (lastRecord.direction == SwipeDirection.RIGHT_KEEP) {
+            viewModelScope.launch {
                 preferencesRepository.unmarkPhotoKept(lastRecord.photo.id)
-            }
-            sessionState.update { current ->
-                current.copy(
-                    undoStack = current.undoStack.dropLast(1),
-                    trashQueueIds = current.trashQueueIds.filterNot { it == lastRecord.photo.id },
-                    sessionKeptIds = current.sessionKeptIds - lastRecord.photo.id,
-                    selectedAlbum = if (
-                        current.selectedAlbum != ALBUM_ALL &&
-                        current.selectedAlbum != lastRecord.photo.albumName
-                    ) {
-                        lastRecord.photo.albumName
-                    } else {
-                        current.selectedAlbum
-                    },
-                    selectedMonth = if (
-                        current.selectedMonth != MONTH_ALL &&
-                        current.selectedMonth != lastRecord.photo.monthKey
-                    ) {
-                        lastRecord.photo.monthKey
-                    } else {
-                        current.selectedMonth
-                    },
-                )
             }
         }
     }
 
     fun restoreFromTrash(photo: PhotoItem) {
-        sessionState.update { current ->
+        galleryFilterState.update { current ->
             current.copy(
                 trashQueueIds = current.trashQueueIds.filterNot { it == photo.id },
                 undoStack = current.undoStack.filterNot { it.photo.id == photo.id },
-                snackbarMessage = "Restored ${photo.displayName} to deck",
             )
         }
+        overlayState.update { it.copy(snackbarMessage = "Restored ${photo.displayName} to deck") }
     }
 
     fun restoreAllFromTrash() {
-        val count = sessionState.value.trashQueueIds.size
+        val count = galleryFilterState.value.trashQueueIds.size
         if (count == 0) return
-        sessionState.update { current ->
+        galleryFilterState.update { current ->
             val trashSet = current.trashQueueIds.toSet()
             current.copy(
                 trashQueueIds = emptyList(),
                 undoStack = current.undoStack.filterNot { it.photo.id in trashSet },
-                snackbarMessage = "Restored $count photos back to deck",
             )
         }
+        overlayState.update { it.copy(snackbarMessage = "Restored $count photos back to deck") }
     }
 
     fun requestBatchDelete() {
@@ -412,10 +540,10 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
         if (targets.isEmpty() || currentState.isDeleting) return
 
         viewModelScope.launch {
-            sessionState.update { it.copy(isDeleting = true, pendingDeletePhotos = targets) }
+            overlayState.update { it.copy(isDeleting = true, pendingDeletePhotos = targets) }
             when (val result = galleryRepository.requestDeletePhotos(targets.map { it.uri })) {
                 is DeleteBatchResult.RequiresConfirmation -> {
-                    sessionState.update {
+                    overlayState.update {
                         it.copy(
                             isDeleting = false,
                             pendingDeleteSender = result.intentSender,
@@ -426,7 +554,7 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
                     finalizeDeletion(targets)
                 }
                 is DeleteBatchResult.Failed -> {
-                    sessionState.update {
+                    overlayState.update {
                         it.copy(
                             isDeleting = false,
                             pendingDeletePhotos = emptyList(),
@@ -439,14 +567,14 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun onDeleteConfirmationResult(confirmed: Boolean) {
-        val targets = sessionState.value.pendingDeletePhotos
-        sessionState.update { it.copy(pendingDeleteSender = null) }
+        val targets = overlayState.value.pendingDeletePhotos
+        overlayState.update { it.copy(pendingDeleteSender = null) }
         if (confirmed && targets.isNotEmpty()) {
             viewModelScope.launch {
                 finalizeDeletion(targets)
             }
         } else {
-            sessionState.update {
+            overlayState.update {
                 it.copy(
                     pendingDeletePhotos = emptyList(),
                     snackbarMessage = "Deletion canceled — photos remain in Trash queue",
@@ -464,12 +592,16 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
             deletedIds = deletedIds,
         )
         val refreshed = galleryRepository.loadDevicePhotos()
-        sessionState.update { current ->
+        galleryFilterState.update { current ->
             current.copy(
-                isDeleting = false,
                 allPhotos = refreshed,
                 trashQueueIds = current.trashQueueIds.filterNot { it in deletedIds },
                 undoStack = current.undoStack.filterNot { it.photo.id in deletedIds },
+            )
+        }
+        overlayState.update {
+            it.copy(
+                isDeleting = false,
                 pendingDeletePhotos = emptyList(),
                 snackbarMessage = "Deleted ${targets.size} photos • Freed ${formatFileSize(freedBytes)}",
             )
@@ -477,11 +609,11 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun selectAlbum(album: String) {
-        sessionState.update { it.copy(selectedAlbum = album) }
+        galleryFilterState.update { it.copy(selectedAlbum = album) }
     }
 
     fun selectMonth(monthKey: String) {
-        sessionState.update { it.copy(selectedMonth = monthKey) }
+        galleryFilterState.update { it.copy(selectedMonth = monthKey) }
     }
 
     fun setSortOrder(sortOrder: SortOrder) {
@@ -494,7 +626,7 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             preferencesRepository.setIncludeReviewed(include)
             if (include) {
-                sessionState.update { it.copy(sessionKeptIds = emptySet()) }
+                galleryFilterState.update { it.copy(sessionKeptIds = emptySet()) }
             }
         }
     }
@@ -508,50 +640,26 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
     fun resetKeptHistory() {
         viewModelScope.launch {
             preferencesRepository.resetKeptHistory()
-            sessionState.update {
-                it.copy(
-                    sessionKeptIds = emptySet(),
-                    snackbarMessage = "Kept photo history cleared",
-                )
-            }
+            galleryFilterState.update { it.copy(sessionKeptIds = emptySet()) }
+            overlayState.update { it.copy(snackbarMessage = "Kept photo history cleared") }
         }
     }
 
     fun openInspector(photo: PhotoItem?) {
-        sessionState.update { it.copy(inspectingPhoto = photo) }
+        overlayState.update { it.copy(inspectingPhoto = photo) }
     }
 
     fun openLightbox(photo: PhotoItem?) {
-        sessionState.update { it.copy(lightboxPhoto = photo) }
+        overlayState.update { it.copy(lightboxPhoto = photo) }
     }
 
     fun clearSnackbar() {
-        sessionState.update { it.copy(snackbarMessage = null) }
+        overlayState.update { it.copy(snackbarMessage = null) }
     }
 
     fun checkForUpdates() {
         viewModelScope.launch {
-            val prefs = preferencesRepository.preferencesFlow.first()
-            val repo = prefs.customGithubRepo.ifBlank { BuildConfig.GITHUB_REPO }
-            checkForUpdatesInternal(repo = repo, silent = false)
-        }
-    }
-
-    fun saveGithubRepo(rawInput: String) {
-        viewModelScope.launch {
-            val normalized = GitHubUpdateChecker.normalizeRepoSlug(rawInput)
-            if (rawInput.isNotBlank() && normalized.isEmpty()) {
-                sessionState.update {
-                    it.copy(snackbarMessage = "Use owner/repo format (e.g. user/TindPhoto)")
-                }
-                return@launch
-            }
-            preferencesRepository.setCustomGithubRepo(normalized)
-            if (normalized.isNotBlank()) {
-                checkForUpdatesInternal(repo = normalized, silent = false)
-            } else {
-                sessionState.update { it.copy(updateStatus = UpdateUiState.Idle) }
-            }
+            checkForUpdatesInternal(silent = false)
         }
     }
 
@@ -565,19 +673,20 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun setShowUpdateDialog(show: Boolean) {
-        sessionState.update { it.copy(showUpdateDialog = show) }
+        overlayState.update { it.copy(showUpdateDialog = show) }
     }
 
-    private suspend fun checkForUpdatesInternal(repo: String, silent: Boolean) {
+    private suspend fun checkForUpdatesInternal(silent: Boolean) {
+        val repo = BuildConfig.GITHUB_REPO
         if (repo.isBlank()) {
             if (!silent) {
-                sessionState.update {
-                    it.copy(updateStatus = UpdateUiState.Error("Set a GitHub repo (owner/repo) first"))
+                overlayState.update {
+                    it.copy(updateStatus = UpdateUiState.UpToDate(latestTag = "v${BuildConfig.VERSION_NAME}"))
                 }
             }
             return
         }
-        sessionState.update { it.copy(updateStatus = UpdateUiState.Checking) }
+        overlayState.update { it.copy(updateStatus = UpdateUiState.Checking) }
         when (
             val result = GitHubUpdateChecker.checkLatestRelease(
                 repoInput = repo,
@@ -585,7 +694,7 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
             )
         ) {
             is UpdateCheckResult.UpdateAvailable -> {
-                sessionState.update {
+                overlayState.update {
                     it.copy(
                         updateStatus = UpdateUiState.Available(
                             release = result.release,
@@ -595,7 +704,7 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             }
             is UpdateCheckResult.UpToDate -> {
-                sessionState.update {
+                overlayState.update {
                     it.copy(
                         updateStatus = if (silent) {
                             UpdateUiState.Idle
@@ -606,7 +715,7 @@ class TindPhotoViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             }
             is UpdateCheckResult.Error -> {
-                sessionState.update {
+                overlayState.update {
                     it.copy(
                         updateStatus = if (silent) {
                             UpdateUiState.Idle

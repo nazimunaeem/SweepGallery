@@ -1,15 +1,15 @@
-# TindPhoto
+# SweepGallery
 
-**TindPhoto** is a fast, privacy-first Android gallery cleaner that lets you declutter your device photos with Tinder-style swipe gestures. Swipe right to keep memories, swipe left to queue clutter for deletion, and reclaim storage space with a single confirmed batch delete.
+**SweepGallery** is a fast, privacy-first Android gallery cleaner that lets you declutter your device photos with smooth swipe gestures. Swipe right to keep memories, swipe left to queue clutter for deletion, and reclaim storage space with a single confirmed batch delete.
 
 ---
 
 ## Features
 
-- **Tinder-Style Swipe Deck**
-  - Physics-based drag and tilt card stack with haptic feedback and live **KEEP** (right) and **DELETE** (left) stamp overlays.
-  - Tactile bottom action dock for **Undo**, **Delete**, **Inspect**, and **Keep**.
-  - Filter by device album (`All Photos`, `Camera`, `Screenshots`, etc.) and sort by **Newest**, **Oldest**, or **Largest** file size.
+- **Smooth Swipe Deck**
+  - Fast horizontal swipe & flick gestures with real-time fading **KEEP** (right) and **DELETE** (left) card overlays, directional border glows, and tactile delete haptic feedback.
+  - Zero-wait back-to-back swiping with Coil image pre-decoding and a simple **X / Undo / Heart** bottom dock.
+  - **Month-Wise & Album Filtering**: Filter photos by month (with automatic green checkmarks when a month is completed) or device album, and sort by **Newest**, **Oldest**, or **Largest** file size.
 - **Fullscreen Zoom & Inspector**
   - Tap any card to open a pinch-to-zoom / double-tap fullscreen **Lightbox** with quick Keep/Delete actions.
   - Open the metadata bottom sheet to inspect filename, album, resolution, file size, and date taken.
@@ -18,7 +18,7 @@
   - **Delete Permanently** uses Android's system-confirmed `MediaStore.createDeleteRequest` dialog (with pre-Android 11 fallback) to permanently remove queued photos and report freed storage.
 - **Studio & Stats Dashboard**
   - Persistent tracking of total space reclaimed, kept vs. deleted counts, and keep ratio via DataStore Preferences.
-  - Quick-launch album breakdown, Darkroom / Light studio theme toggle, kept-history reset, and an **Add Sample Photos** helper for testing on an empty gallery or emulator.
+  - Quick-launch month & album breakdown, Darkroom / Light studio theme toggle, kept-history reset, **Add Sample Photos** helper, and automatic **GitHub Releases** update checks.
 - **Adaptive Edge-to-Edge UI**
   - Switches automatically between a bottom `NavigationBar` on phones and a `NavigationRail` on tablets/foldables.
 
@@ -38,7 +38,7 @@
 
 ## Privacy
 
-TindPhoto operates **100% on-device**. Your photos are read directly from local `MediaStore` storage and are never uploaded, analyzed externally, or shared off your device.
+SweepGallery operates **100% on-device**. Your photos are read directly from local `MediaStore` storage and are never uploaded, analyzed externally, or shared off your device. Network access is used solely to check for newer app releases.
 
 ---
 
@@ -63,6 +63,6 @@ The debug APK is output to:
 
 The included GitHub Actions workflow (`.github/workflows/release-apk.yml`) automatically builds and publishes the APK whenever you push to `main`/`master`, push a `v*` tag, or trigger it manually from the **Actions** tab:
 
-- Uploads `TindPhoto-APK` as a downloadable `.zip` workflow artifact.
+- Uploads `SweepGallery-APK` as a downloadable `.zip` workflow artifact.
 - Publishes the `.apk` directly to **GitHub Releases**.
 - Builds a signed release APK if `RELEASE_KEYSTORE_BASE64`, `STORE_PASSWORD`, and `KEY_PASSWORD` repository secrets are configured; otherwise builds the debug APK automatically.

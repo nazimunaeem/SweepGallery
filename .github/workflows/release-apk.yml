@@ -100,13 +100,13 @@ jobs:
       - name: Upload APK workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TindPhoto-APK
+          name: SweepGallery-APK
           path: ${{ steps.build_apk.outputs.apk_path }}
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_tag.outputs.tag }}
-          name: TindPhoto ${{ steps.release_tag.outputs.tag }}
+          name: SweepGallery ${{ steps.release_tag.outputs.tag }}
           generate_release_notes: true
           files: ${{ steps.build_apk.outputs.apk_path }}

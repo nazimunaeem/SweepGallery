@@ -23,7 +23,6 @@ data class PersistedPreferences(
     val includeReviewed: Boolean = false,
     val sortOrder: SortOrder = SortOrder.NEWEST,
     val darkMode: Boolean = true,
-    val customGithubRepo: String = "",
     val dismissedUpdateTag: String = "",
 )
 
@@ -37,7 +36,6 @@ class PreferencesRepository(private val context: Context) {
         val INCLUDE_REVIEWED = booleanPreferencesKey("include_reviewed")
         val SORT_ORDER = stringPreferencesKey("sort_order")
         val DARK_MODE = booleanPreferencesKey("dark_mode")
-        val CUSTOM_GITHUB_REPO = stringPreferencesKey("custom_github_repo")
         val DISMISSED_UPDATE_TAG = stringPreferencesKey("dismissed_update_tag")
     }
 
@@ -60,7 +58,6 @@ class PreferencesRepository(private val context: Context) {
             includeReviewed = prefs[Keys.INCLUDE_REVIEWED] ?: false,
             sortOrder = sortOrder,
             darkMode = prefs[Keys.DARK_MODE] ?: true,
-            customGithubRepo = prefs[Keys.CUSTOM_GITHUB_REPO] ?: "",
             dismissedUpdateTag = prefs[Keys.DISMISSED_UPDATE_TAG] ?: "",
         )
     }
@@ -119,12 +116,6 @@ class PreferencesRepository(private val context: Context) {
     suspend fun resetKeptHistory() {
         context.dataStore.edit { prefs ->
             prefs[Keys.KEPT_PHOTO_IDS] = emptySet()
-        }
-    }
-
-    suspend fun setCustomGithubRepo(repo: String) {
-        context.dataStore.edit { prefs ->
-            prefs[Keys.CUSTOM_GITHUB_REPO] = repo.trim()
         }
     }
 

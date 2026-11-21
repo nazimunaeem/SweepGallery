@@ -372,7 +372,6 @@ fun TindPhotoApp(
                                             onResetKeptHistory = viewModel::resetKeptHistory,
                                             onSeedSamples = viewModel::seedSamplePhotos,
                                             onCheckForUpdates = viewModel::checkForUpdates,
-                                            onSaveGithubRepo = viewModel::saveGithubRepo,
                                             onOpenUpdateDialog = { viewModel.setShowUpdateDialog(true) },
                                         )
                                     }
@@ -425,7 +424,7 @@ fun TindPhotoApp(
                                 )
                             } else {
                                 Text(
-                                    text = "A newer build of TindPhoto is published on GitHub Releases.",
+                                    text = "A newer build of SweepGallery is published on GitHub Releases.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )

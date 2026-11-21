@@ -72,7 +72,7 @@ object GitHubUpdateChecker {
                 connectTimeout = 10_000
                 readTimeout = 10_000
                 setRequestProperty("Accept", "application/vnd.github+json")
-                setRequestProperty("User-Agent", "TindPhoto-Android/$currentVersionName")
+                setRequestProperty("User-Agent", "SweepGallery-Android/$currentVersionName")
             }
 
             val code = connection.responseCode

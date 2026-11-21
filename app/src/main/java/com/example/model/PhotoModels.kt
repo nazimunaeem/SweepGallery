@@ -1,12 +1,14 @@
 package com.example.model
 
 import android.net.Uri
+import androidx.compose.runtime.Immutable
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.log10
 import kotlin.math.pow
 
+@Immutable
 data class PhotoItem(
     val id: Long,
     val uri: Uri,
@@ -18,23 +20,28 @@ data class PhotoItem(
     val height: Int,
     val albumName: String,
 ) {
-    val effectiveDateMillis: Long
-        get() = if (dateTakenMillis > 0L) dateTakenMillis else dateAddedSeconds * 1000L
+    val effectiveDateMillis: Long =
+        if (dateTakenMillis > 0L) dateTakenMillis else dateAddedSeconds * 1000L
 
-    val formattedSize: String
-        get() = formatFileSize(sizeBytes)
+    val formattedSize: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        formatFileSize(sizeBytes)
+    }
 
-    val formattedDate: String
-        get() = formatPhotoDate(effectiveDateMillis)
+    val formattedDate: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        formatPhotoDate(effectiveDateMillis)
+    }
 
-    val monthKey: String
-        get() = formatMonthKey(effectiveDateMillis)
+    val monthKey: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        formatMonthKey(effectiveDateMillis)
+    }
 
-    val monthLabel: String
-        get() = formatMonthLabel(effectiveDateMillis)
+    val monthLabel: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        formatMonthLabel(effectiveDateMillis)
+    }
 
-    val resolutionLabel: String
-        get() = if (width > 0 && height > 0) "${width} × ${height}" else "Unknown"
+    val resolutionLabel: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        if (width > 0 && height > 0) "${width} × ${height}" else "Unknown"
+    }
 }
 
 enum class SortOrder(val label: String) {
@@ -48,23 +55,27 @@ enum class SwipeDirection {
     RIGHT_KEEP,
 }
 
+@Immutable
 data class SwipeRecord(
     val photo: PhotoItem,
     val direction: SwipeDirection,
 )
 
+@Immutable
 data class TindPhotoStats(
     val totalDeletedCount: Int = 0,
     val totalKeptCount: Int = 0,
     val totalFreedBytes: Long = 0L,
 )
 
+@Immutable
 data class AlbumSummary(
     val name: String,
     val count: Int,
     val totalBytes: Long,
 )
 
+@Immutable
 data class MonthSummary(
     val key: String,
     val label: String,
@@ -73,6 +84,18 @@ data class MonthSummary(
     val totalBytes: Long,
     val isCompleted: Boolean,
 )
+
+private val photoDateFormatter = ThreadLocal.withInitial {
+    SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+}
+
+private val monthKeyFormatter = ThreadLocal.withInitial {
+    SimpleDateFormat("yyyy-MM", Locale.US)
+}
+
+private val monthLabelFormatter = ThreadLocal.withInitial {
+    SimpleDateFormat("MMM yyyy", Locale.getDefault())
+}
 
 fun formatFileSize(bytes: Long): String {
     if (bytes <= 0L) return "0 B"
@@ -88,18 +111,15 @@ fun formatFileSize(bytes: Long): String {
 
 fun formatPhotoDate(millis: Long): String {
     if (millis <= 0L) return "Unknown date"
-    val formatter = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-    return formatter.format(Date(millis))
+    return photoDateFormatter.get()?.format(Date(millis)) ?: "Unknown date"
 }
 
 fun formatMonthKey(millis: Long): String {
     if (millis <= 0L) return "0000-00"
-    val formatter = SimpleDateFormat("yyyy-MM", Locale.US)
-    return formatter.format(Date(millis))
+    return monthKeyFormatter.get()?.format(Date(millis)) ?: "0000-00"
 }
 
 fun formatMonthLabel(millis: Long): String {
     if (millis <= 0L) return "Unknown"
-    val formatter = SimpleDateFormat("MMM yyyy", Locale.getDefault())
-    return formatter.format(Date(millis))
+    return monthLabelFormatter.get()?.format(Date(millis)) ?: "Unknown"
 }

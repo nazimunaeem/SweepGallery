@@ -1,8 +1,9 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -10,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -66,18 +68,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -86,7 +87,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.imageLoader
 import coil.request.ImageRequest
+import coil.size.Precision
 import com.example.R
 import com.example.model.MonthSummary
 import com.example.model.PhotoItem
@@ -99,11 +102,23 @@ import com.example.ui.theme.FlameCoral
 import com.example.ui.theme.KeepEmerald
 import com.example.ui.theme.TrashCrimson
 import com.example.ui.theme.UndoAmber
+import com.example.ui.util.SwipeHaptics
+import com.example.ui.util.rememberSwipeHaptics
 import com.example.ui.viewmodel.ALBUM_ALL
 import com.example.ui.viewmodel.MONTH_ALL
 import com.example.ui.viewmodel.TindPhotoUiState
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+
+private const val DECK_IMAGE_MAX_DIM = 1080
+
+private data class ExitingCardState(
+    val photo: PhotoItem,
+    val direction: SwipeDirection,
+    val startX: Float,
+    val startY: Float,
+)
 
 @Composable
 fun SwipeDeckScreen(
@@ -121,16 +136,59 @@ fun SwipeDeckScreen(
     onOpenTrashTab: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var programmaticSwipe by remember { mutableStateOf<Pair<Long, SwipeDirection>?>(null) }
-    var topCardSignedProgress by remember { mutableFloatStateOf(0f) }
+    val context = LocalContext.current
+    val swipeHaptics = rememberSwipeHaptics()
+    val dragProgressState = remember { mutableFloatStateOf(0f) }
 
-    val topPhoto = state.deckPhotos.firstOrNull()
+    var exitingCards by remember { mutableStateOf<List<ExitingCardState>>(emptyList()) }
+    var pendingRemovalIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+
+    val activeDeckPhotos = remember(state.deckPhotos, pendingRemovalIds) {
+        if (pendingRemovalIds.isEmpty()) {
+            state.deckPhotos
+        } else {
+            state.deckPhotos.filter { it.id !in pendingRemovalIds }
+        }
+    }
+
+    val topPhoto = activeDeckPhotos.firstOrNull()
+    val upcomingPhotos = remember(activeDeckPhotos) { activeDeckPhotos.take(6) }
+
+    LaunchedEffect(state.deckPhotos) {
+        if (pendingRemovalIds.isNotEmpty()) {
+            val presentIds = state.deckPhotos.mapTo(HashSet(state.deckPhotos.size)) { it.id }
+            val stillPresent = pendingRemovalIds.filterTo(HashSet()) { it in presentIds }
+            if (stillPresent.size != pendingRemovalIds.size) {
+                pendingRemovalIds = stillPresent
+            }
+        }
+    }
 
     LaunchedEffect(topPhoto?.id) {
-        topCardSignedProgress = 0f
-        if (programmaticSwipe != null && programmaticSwipe?.first != topPhoto?.id) {
-            programmaticSwipe = null
+        dragProgressState.floatValue = 0f
+    }
+
+    LaunchedEffect(upcomingPhotos) {
+        val loader = context.imageLoader
+        upcomingPhotos.forEach { photo ->
+            loader.enqueue(
+                ImageRequest.Builder(context)
+                    .data(photo.uri)
+                    .size(DECK_IMAGE_MAX_DIM, DECK_IMAGE_MAX_DIM)
+                    .precision(Precision.INEXACT)
+                    .memoryCacheKey("deck_${photo.id}")
+                    .build(),
+            )
         }
+    }
+
+    val commitSwipe: (PhotoItem, SwipeDirection, Float, Float) -> Unit = { photo, direction, startX, startY ->
+        dragProgressState.floatValue = 0f
+        pendingRemovalIds = pendingRemovalIds + photo.id
+        exitingCards = (exitingCards.filterNot { it.photo.id == photo.id } +
+            ExitingCardState(photo = photo, direction = direction, startX = startX, startY = startY))
+            .takeLast(3)
+        onSwipe(photo, direction)
     }
 
     Column(
@@ -179,7 +237,7 @@ fun SwipeDeckScreen(
                         )
                     }
                 }
-                state.deckPhotos.isEmpty() -> {
+                activeDeckPhotos.isEmpty() && exitingCards.isEmpty() -> {
                     val activeMonth = state.months.firstOrNull { it.key == state.selectedMonth }
                     EmptyDeckCard(
                         hasAnyPhotosOnDevice = state.allPhotosCount > 0,
@@ -200,28 +258,20 @@ fun SwipeDeckScreen(
                     )
                 }
                 else -> {
-                    val visibleCards = state.deckPhotos.take(3)
+                    val visibleCards = remember(activeDeckPhotos) { activeDeckPhotos.take(3) }
                     visibleCards.asReversed().forEach { photo ->
                         val stackIndex = visibleCards.indexOf(photo)
-                        val isTop = stackIndex == 0
                         key(photo.id) {
                             SwipeablePhotoCard(
                                 photo = photo,
                                 stackIndex = stackIndex,
-                                behindProgress = if (isTop) 0f else abs(topCardSignedProgress),
-                                programmaticDirection = if (isTop && programmaticSwipe?.first == photo.id) {
-                                    programmaticSwipe?.second
-                                } else {
-                                    null
-                                },
+                                swipeHaptics = swipeHaptics,
+                                dragProgressProvider = { dragProgressState.floatValue },
                                 onDragProgress = { signedProgress ->
-                                    if (isTop) topCardSignedProgress = signedProgress
+                                    if (stackIndex == 0) dragProgressState.floatValue = signedProgress
                                 },
-                                onSwiped = { direction ->
-                                    if (programmaticSwipe?.first == photo.id) {
-                                        programmaticSwipe = null
-                                    }
-                                    onSwipe(photo, direction)
+                                onCommitSwipe = { direction, startX, startY ->
+                                    commitSwipe(photo, direction, startX, startY)
                                 },
                                 onTapZoom = { onOpenLightbox(photo) },
                                 onTapInfo = { onInspectPhoto(photo) },
@@ -231,26 +281,42 @@ fun SwipeDeckScreen(
                     }
                 }
             }
+
+            // Non-blocking fly-out overlay so the promoted next card is interactive immediately
+            exitingCards.forEach { exiting ->
+                key("exit_${exiting.photo.id}") {
+                    ExitingPhotoCard(
+                        exiting = exiting,
+                        onFinished = {
+                            exitingCards = exitingCards.filterNot { it.photo.id == exiting.photo.id }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
         }
 
         // Bottom Simple & Smart Action Dock
         SwipeActionDock(
             hasActiveCard = topPhoto != null && !state.isLoading,
             canUndo = state.canUndo,
-            dragProgress = topCardSignedProgress,
-            onUndo = onUndo,
+            dragProgressProvider = { dragProgressState.floatValue },
+            onUndo = {
+                exitingCards = emptyList()
+                pendingRemovalIds = emptySet()
+                dragProgressState.floatValue = 0f
+                onUndo()
+            },
             onTrashClick = {
-                topPhoto?.let {
-                    if (programmaticSwipe == null) {
-                        programmaticSwipe = it.id to SwipeDirection.LEFT_TRASH
-                    }
+                topPhoto?.let { photo ->
+                    swipeHaptics.onDeleteCommitted()
+                    commitSwipe(photo, SwipeDirection.LEFT_TRASH, 0f, 0f)
                 }
             },
             onKeepClick = {
-                topPhoto?.let {
-                    if (programmaticSwipe == null) {
-                        programmaticSwipe = it.id to SwipeDirection.RIGHT_KEEP
-                    }
+                topPhoto?.let { photo ->
+                    swipeHaptics.onKeepCommitted()
+                    commitSwipe(photo, SwipeDirection.RIGHT_KEEP, 0f, 0f)
                 }
             },
         )
@@ -522,10 +588,10 @@ private fun SwipeTopBar(
 private fun SwipeablePhotoCard(
     photo: PhotoItem,
     stackIndex: Int,
-    behindProgress: Float,
-    programmaticDirection: SwipeDirection?,
+    swipeHaptics: SwipeHaptics,
+    dragProgressProvider: () -> Float,
     onDragProgress: (Float) -> Unit,
-    onSwiped: (SwipeDirection) -> Unit,
+    onCommitSwipe: (SwipeDirection, Float, Float) -> Unit,
     onTapZoom: () -> Unit,
     onTapInfo: () -> Unit,
     modifier: Modifier = Modifier,
@@ -533,62 +599,104 @@ private fun SwipeablePhotoCard(
     val isTop = stackIndex == 0
     val context = LocalContext.current
     val density = LocalDensity.current
-    val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
 
     val offsetX = remember(photo.id) { Animatable(0f) }
     val offsetY = remember(photo.id) { Animatable(0f) }
-    val thresholdPx = with(density) { 120.dp.toPx() }
-    val flyOutDistance = with(density) { 520.dp.toPx() }
-    var crossedThreshold by remember(photo.id) { mutableStateOf(false) }
+    val promotionAnim = remember(photo.id) { Animatable(if (stackIndex == 0) 1f else 0f) }
+    val velocityTracker = remember(photo.id) { VelocityTracker() }
+    val cardInteractionSource = remember(photo.id) { MutableInteractionSource() }
 
-    LaunchedEffect(programmaticDirection) {
-        if (isTop && programmaticDirection != null) {
-            val isRight = programmaticDirection == SwipeDirection.RIGHT_KEEP
-            val targetX = if (isRight) flyOutDistance else -flyOutDistance
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            onDragProgress(if (isRight) 1f else -1f)
-            offsetX.animateTo(targetX, animationSpec = tween(durationMillis = 220))
-            onSwiped(programmaticDirection)
+    val thresholdPx = remember(density) { with(density) { 72.dp.toPx() } }
+    val flickVelocityPx = remember(density) { with(density) { 500.dp.toPx() } }
+    val minFlickDistancePx = remember(density) { with(density) { 18.dp.toPx() } }
+    val promotionOffsetPx = remember(density) { with(density) { 10.dp.toPx() } }
+
+    LaunchedEffect(isTop) {
+        if (isTop && promotionAnim.value < 1f) {
+            promotionAnim.animateTo(
+                1f,
+                animationSpec = tween(durationMillis = 105, easing = FastOutSlowInEasing),
+            )
         }
     }
 
-    val targetScale = when (stackIndex) {
+    val behindScaleBase = when (stackIndex) {
         0 -> 1f
-        1 -> 0.94f + (0.06f * behindProgress.coerceIn(0f, 1f))
-        else -> 0.89f + (0.05f * behindProgress.coerceIn(0f, 1f))
+        1 -> 0.94f
+        else -> 0.89f
     }
-    val targetTranslationY = when (stackIndex) {
+    val behindScaleDelta = when (stackIndex) {
         0 -> 0f
-        1 -> with(density) { (14.dp - (14.dp * behindProgress.coerceIn(0f, 1f))).toPx() }
-        else -> with(density) { (26.dp - (12.dp * behindProgress.coerceIn(0f, 1f))).toPx() }
+        1 -> 0.06f
+        else -> 0.05f
+    }
+    val behindTransBasePx = remember(density, stackIndex) {
+        with(density) {
+            when (stackIndex) {
+                0 -> 0f
+                1 -> 14.dp.toPx()
+                else -> 26.dp.toPx()
+            }
+        }
+    }
+    val behindTransDeltaPx = remember(density, stackIndex) {
+        with(density) {
+            when (stackIndex) {
+                0 -> 0f
+                1 -> 14.dp.toPx()
+                else -> 12.dp.toPx()
+            }
+        }
+    }
+
+    val cacheKey = "deck_${photo.id}"
+    val imageRequest = remember(photo.id, context) {
+        ImageRequest.Builder(context)
+            .data(photo.uri)
+            .size(DECK_IMAGE_MAX_DIM, DECK_IMAGE_MAX_DIM)
+            .precision(Precision.INEXACT)
+            .memoryCacheKey(cacheKey)
+            .placeholderMemoryCacheKey(cacheKey)
+            .crossfade(false)
+            .build()
     }
 
     val dragModifier = if (isTop) {
         Modifier.pointerInput(photo.id) {
+            var crossedThreshold = false
             detectDragGestures(
+                onDragStart = {
+                    crossedThreshold = abs(offsetX.value) >= thresholdPx
+                    velocityTracker.resetTracking()
+                },
                 onDragEnd = {
                     val currentX = offsetX.value
-                    scope.launch {
-                        when {
-                            currentX > thresholdPx -> {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                offsetX.animateTo(flyOutDistance, animationSpec = tween(190))
-                                onSwiped(SwipeDirection.RIGHT_KEEP)
-                            }
-                            currentX < -thresholdPx -> {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                offsetX.animateTo(-flyOutDistance, animationSpec = tween(190))
-                                onSwiped(SwipeDirection.LEFT_TRASH)
-                            }
-                            else -> {
-                                crossedThreshold = false
-                                onDragProgress(0f)
+                    val currentY = offsetY.value
+                    val velocityX = velocityTracker.calculateVelocity().x
+                    val shouldKeep = currentX > thresholdPx ||
+                        (velocityX > flickVelocityPx && currentX > minFlickDistancePx)
+                    val shouldTrash = currentX < -thresholdPx ||
+                        (velocityX < -flickVelocityPx && currentX < -minFlickDistancePx)
+
+                    when {
+                        shouldKeep -> {
+                            swipeHaptics.onKeepCommitted()
+                            onCommitSwipe(SwipeDirection.RIGHT_KEEP, currentX, currentY)
+                        }
+                        shouldTrash -> {
+                            swipeHaptics.onDeleteCommitted()
+                            onCommitSwipe(SwipeDirection.LEFT_TRASH, currentX, currentY)
+                        }
+                        else -> {
+                            crossedThreshold = false
+                            onDragProgress(0f)
+                            scope.launch {
                                 launch {
                                     offsetX.animateTo(
                                         0f,
                                         spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
                                             stiffness = Spring.StiffnessMedium,
                                         ),
                                     )
@@ -597,7 +705,7 @@ private fun SwipeablePhotoCard(
                                     offsetY.animateTo(
                                         0f,
                                         spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
                                             stiffness = Spring.StiffnessMedium,
                                         ),
                                     )
@@ -610,27 +718,44 @@ private fun SwipeablePhotoCard(
                     crossedThreshold = false
                     onDragProgress(0f)
                     scope.launch {
-                        offsetX.animateTo(0f, spring())
-                        offsetY.animateTo(0f, spring())
+                        launch {
+                            offsetX.animateTo(
+                                0f,
+                                spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMedium,
+                                ),
+                            )
+                        }
+                        launch {
+                            offsetY.animateTo(
+                                0f,
+                                spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMedium,
+                                ),
+                            )
+                        }
                     }
                 },
                 onDrag = { change, dragAmount ->
                     change.consume()
-                    scope.launch {
-                        val nextX = offsetX.value + dragAmount.x
-                        val nextY = (offsetY.value + dragAmount.y * 0.35f).coerceIn(-140f, 140f)
+                    val nextX = offsetX.value + dragAmount.x
+                    val nextY = (offsetY.value + dragAmount.y * 0.32f).coerceIn(-120f, 120f)
+                    velocityTracker.addPosition(change.uptimeMillis, Offset(nextX, nextY))
+                    scope.launch(start = CoroutineStart.UNDISPATCHED) {
                         offsetX.snapTo(nextX)
                         offsetY.snapTo(nextY)
-                        val signedProgress = (nextX / thresholdPx).coerceIn(-1f, 1f)
-                        onDragProgress(signedProgress)
+                    }
+                    val signedProgress = (nextX / thresholdPx).coerceIn(-1f, 1f)
+                    onDragProgress(signedProgress)
 
-                        val nowCrossed = abs(nextX) >= thresholdPx
-                        if (nowCrossed && !crossedThreshold) {
-                            crossedThreshold = true
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        } else if (!nowCrossed && crossedThreshold) {
-                            crossedThreshold = false
-                        }
+                    val nowCrossed = abs(nextX) >= thresholdPx
+                    if (nowCrossed && !crossedThreshold) {
+                        crossedThreshold = true
+                        swipeHaptics.onThresholdCrossed(isDeleteDirection = nextX < 0f)
+                    } else if (!nowCrossed && crossedThreshold) {
+                        crossedThreshold = false
                     }
                 },
             )
@@ -639,43 +764,43 @@ private fun SwipeablePhotoCard(
         Modifier
     }
 
-    val keepAlpha = if (isTop && offsetX.value > 0f) {
-        ((offsetX.value / thresholdPx) - 0.12f).coerceIn(0f, 1f)
-    } else {
-        0f
-    }
-    val trashAlpha = if (isTop && offsetX.value < 0f) {
-        ((-offsetX.value / thresholdPx) - 0.12f).coerceIn(0f, 1f)
-    } else {
-        0f
-    }
-
     Surface(
         modifier = modifier
             .graphicsLayer {
                 if (isTop) {
-                    translationX = offsetX.value
-                    translationY = offsetY.value
-                    rotationZ = (offsetX.value / 32f).coerceIn(-16f, 16f)
+                    val x = offsetX.value
+                    val settle = promotionAnim.value
+                    val baseScale = 0.95f + (0.05f * settle)
+                    scaleX = baseScale
+                    scaleY = baseScale
+                    translationX = x
+                    translationY = offsetY.value + ((1f - settle) * promotionOffsetPx)
+                    rotationZ = (x / 24f).coerceIn(-14f, 14f)
                 } else {
-                    scaleX = targetScale
-                    scaleY = targetScale
-                    translationY = targetTranslationY
-                    alpha = if (stackIndex == 1) 0.92f else 0.78f
+                    val p = abs(dragProgressProvider()).coerceIn(0f, 1f)
+                    val s = behindScaleBase + (behindScaleDelta * p)
+                    scaleX = s
+                    scaleY = s
+                    translationY = behindTransBasePx - (behindTransDeltaPx * p)
+                    alpha = if (stackIndex == 1) 0.92f + (0.08f * p) else 0.78f + (0.14f * p)
                 }
             }
             .then(dragModifier)
             .clip(MaterialTheme.shapes.large)
             .then(
                 if (isTop) {
-                    Modifier.clickable(onClick = onTapZoom)
+                    Modifier.clickable(
+                        interactionSource = cardInteractionSource,
+                        indication = null,
+                        onClick = onTapZoom,
+                    )
                 } else {
                     Modifier
                 },
             ),
         shape = MaterialTheme.shapes.large,
         color = Color(0xFF0A0A0F),
-        shadowElevation = if (isTop) 12.dp else 4.dp,
+        shadowElevation = 0.dp,
         border = BorderStroke(
             width = 1.dp,
             color = MaterialTheme.colorScheme.outlineVariant,
@@ -687,10 +812,7 @@ private fun SwipeablePhotoCard(
                 .background(Color(0xFF0A0A0F)),
         ) {
             AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(photo.uri)
-                    .crossfade(true)
-                    .build(),
+                model = imageRequest,
                 contentDescription = photo.displayName,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize(),
@@ -712,15 +834,54 @@ private fun SwipeablePhotoCard(
                     ),
             )
 
-            // Top-right Zoom pill hint
             if (isTop) {
+                // Real-time KEEP directional tint wash & border glow (right drag)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = ((offsetX.value - 6f) / (thresholdPx - 6f)).coerceIn(0f, 1f)
+                        }
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    KeepEmerald.copy(alpha = 0.06f),
+                                    KeepEmerald.copy(alpha = 0.34f),
+                                ),
+                            ),
+                        )
+                        .border(2.5.dp, KeepEmerald, MaterialTheme.shapes.large),
+                )
+
+                // Real-time DELETE directional tint wash & border glow (left drag)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = ((-offsetX.value - 6f) / (thresholdPx - 6f)).coerceIn(0f, 1f)
+                        }
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    TrashCrimson.copy(alpha = 0.36f),
+                                    TrashCrimson.copy(alpha = 0.06f),
+                                ),
+                            ),
+                        )
+                        .border(2.5.dp, TrashCrimson, MaterialTheme.shapes.large),
+                )
+
+                // Top-right Zoom pill hint (fades out while dragging so DELETE overlay stays clear)
                 Surface(
                     onClick = onTapZoom,
                     shape = CircleShape,
                     color = Color.Black.copy(alpha = 0.52f),
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(14.dp),
+                        .padding(14.dp)
+                        .graphicsLayer {
+                            alpha = 1f - (abs(offsetX.value) / (thresholdPx * 0.45f)).coerceIn(0f, 1f)
+                        },
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.ZoomIn,
@@ -731,28 +892,26 @@ private fun SwipeablePhotoCard(
                             .size(18.dp),
                     )
                 }
-            }
 
-            // KEEP Stamp (top-left)
-            if (keepAlpha > 0.01f) {
+                // Fading KEEP Overlay Stamp (top-left) - driven solely in graphicsLayer
                 SwipeStampBadge(
                     label = stringResource(R.string.stamp_keep),
+                    icon = Icons.Rounded.Favorite,
                     color = KeepEmerald,
                     rotationDegrees = -14f,
-                    alpha = keepAlpha,
+                    alphaProvider = { ((offsetX.value - 6f) / (thresholdPx - 6f)).coerceIn(0f, 1f) },
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(start = 24.dp, top = 32.dp),
                 )
-            }
 
-            // DELETE Stamp (top-right)
-            if (trashAlpha > 0.01f) {
+                // Fading DELETE Overlay Stamp (top-right) - driven solely in graphicsLayer
                 SwipeStampBadge(
                     label = stringResource(R.string.stamp_trash),
+                    icon = Icons.Rounded.DeleteOutline,
                     color = TrashCrimson,
                     rotationDegrees = 14f,
-                    alpha = trashAlpha,
+                    alphaProvider = { ((-offsetX.value - 6f) / (thresholdPx - 6f)).coerceIn(0f, 1f) },
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(end = 24.dp, top = 32.dp),
@@ -829,21 +988,150 @@ private fun SwipeablePhotoCard(
 }
 
 @Composable
-private fun SwipeStampBadge(
-    label: String,
-    color: Color,
-    rotationDegrees: Float,
-    alpha: Float,
+private fun ExitingPhotoCard(
+    exiting: ExitingCardState,
+    onFinished: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val flyOutDistance = remember(density) { with(density) { 460.dp.toPx() } }
+    val isRight = exiting.direction == SwipeDirection.RIGHT_KEEP
+    val targetX = if (isRight) flyOutDistance else -flyOutDistance
+
+    val animX = remember(exiting.photo.id) { Animatable(exiting.startX) }
+    val progressAnim = remember(exiting.photo.id) { Animatable(0f) }
+
+    val cacheKey = "deck_${exiting.photo.id}"
+    val imageRequest = remember(exiting.photo.id, context) {
+        ImageRequest.Builder(context)
+            .data(exiting.photo.uri)
+            .size(DECK_IMAGE_MAX_DIM, DECK_IMAGE_MAX_DIM)
+            .precision(Precision.INEXACT)
+            .memoryCacheKey(cacheKey)
+            .placeholderMemoryCacheKey(cacheKey)
+            .crossfade(false)
+            .build()
+    }
+
+    LaunchedEffect(exiting.photo.id) {
+        val flyOutJob = launch {
+            animX.animateTo(
+                targetX,
+                animationSpec = tween(durationMillis = 155, easing = FastOutLinearInEasing),
+            )
+        }
+        val fadeJob = launch {
+            progressAnim.animateTo(
+                1f,
+                animationSpec = tween(durationMillis = 155, easing = FastOutLinearInEasing),
+            )
+        }
+        flyOutJob.join()
+        fadeJob.join()
+        onFinished()
+    }
+
+    Surface(
         modifier = modifier
-            .alpha(alpha)
-            .graphicsLayer { rotationZ = rotationDegrees }
-            .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-            .border(width = 3.dp, color = color, shape = RoundedCornerShape(10.dp))
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .graphicsLayer {
+                val x = animX.value
+                translationX = x
+                translationY = exiting.startY + (progressAnim.value * 28f)
+                rotationZ = (x / 24f).coerceIn(-16f, 16f)
+                alpha = (1f - (progressAnim.value * 0.45f)).coerceIn(0f, 1f)
+            }
+            .clip(MaterialTheme.shapes.large),
+        shape = MaterialTheme.shapes.large,
+        color = Color(0xFF0A0A0F),
+        shadowElevation = 0.dp,
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant,
+        ),
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0A0A0F)),
+        ) {
+            AsyncImage(
+                model = imageRequest,
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        if (isRight) {
+                            Brush.horizontalGradient(
+                                listOf(KeepEmerald.copy(alpha = 0.08f), KeepEmerald.copy(alpha = 0.34f)),
+                            )
+                        } else {
+                            Brush.horizontalGradient(
+                                listOf(TrashCrimson.copy(alpha = 0.36f), TrashCrimson.copy(alpha = 0.08f)),
+                            )
+                        },
+                    )
+                    .border(
+                        width = 2.5.dp,
+                        color = if (isRight) KeepEmerald else TrashCrimson,
+                        shape = MaterialTheme.shapes.large,
+                    ),
+            )
+
+            SwipeStampBadge(
+                label = stringResource(if (isRight) R.string.stamp_keep else R.string.stamp_trash),
+                icon = if (isRight) Icons.Rounded.Favorite else Icons.Rounded.DeleteOutline,
+                color = if (isRight) KeepEmerald else TrashCrimson,
+                rotationDegrees = if (isRight) -14f else 14f,
+                alphaProvider = { 1f },
+                modifier = Modifier
+                    .align(if (isRight) Alignment.TopStart else Alignment.TopEnd)
+                    .padding(
+                        start = if (isRight) 24.dp else 0.dp,
+                        end = if (isRight) 0.dp else 24.dp,
+                        top = 32.dp,
+                    ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SwipeStampBadge(
+    label: String,
+    icon: ImageVector,
+    color: Color,
+    rotationDegrees: Float,
+    alphaProvider: () -> Float,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .graphicsLayer {
+                val a = alphaProvider()
+                val s = 0.86f + (0.16f * a)
+                alpha = a
+                scaleX = s
+                scaleY = s
+                rotationZ = rotationDegrees
+            }
+            .background(Color.Black.copy(alpha = 0.56f), RoundedCornerShape(12.dp))
+            .border(width = 3.dp, color = color, shape = RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(24.dp),
+        )
         Text(
             text = label,
             style = MaterialTheme.typography.headlineSmall.copy(
@@ -859,46 +1147,12 @@ private fun SwipeStampBadge(
 private fun SwipeActionDock(
     hasActiveCard: Boolean,
     canUndo: Boolean,
-    dragProgress: Float,
+    dragProgressProvider: () -> Float,
     onUndo: () -> Unit,
     onTrashClick: () -> Unit,
     onKeepClick: () -> Unit,
 ) {
-    val trashBoost = if (hasActiveCard && dragProgress < 0f) (-dragProgress).coerceIn(0f, 1f) else 0f
-    val keepBoost = if (hasActiveCard && dragProgress > 0f) dragProgress.coerceIn(0f, 1f) else 0f
-
-    val trashScale by animateFloatAsState(
-        targetValue = 1f + (0.14f * trashBoost),
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "trashScale",
-    )
-    val keepScale by animateFloatAsState(
-        targetValue = 1f + (0.14f * keepBoost),
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "keepScale",
-    )
-
-    val trashContainer = if (hasActiveCard) {
-        lerp(TrashCrimson.copy(alpha = 0.14f), TrashCrimson, trashBoost)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainer
-    }
-    val trashIconTint = if (hasActiveCard) {
-        lerp(TrashCrimson, Color.White, trashBoost)
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-    }
-
-    val keepContainer = if (hasActiveCard) {
-        lerp(KeepEmerald.copy(alpha = 0.14f), KeepEmerald, keepBoost)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainer
-    }
-    val keepIconTint = if (hasActiveCard) {
-        lerp(KeepEmerald, Color(0xFF042619), keepBoost)
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-    }
+    val disabledTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
 
     Row(
         modifier = Modifier
@@ -913,22 +1167,40 @@ private fun SwipeActionDock(
             onClick = onTrashClick,
             enabled = hasActiveCard,
             shape = CircleShape,
-            color = trashContainer,
+            color = if (hasActiveCard) TrashCrimson.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainer,
             modifier = Modifier
                 .size(62.dp)
                 .graphicsLayer {
-                    scaleX = trashScale
-                    scaleY = trashScale
+                    val boost = if (hasActiveCard) (-dragProgressProvider()).coerceIn(0f, 1f) else 0f
+                    val scale = 1f + (0.15f * boost)
+                    scaleX = scale
+                    scaleY = scale
                 }
                 .testTag("trash_action_button"),
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                 Icon(
                     imageVector = Icons.Rounded.Close,
                     contentDescription = stringResource(R.string.cd_trash),
-                    tint = trashIconTint,
+                    tint = if (hasActiveCard) TrashCrimson else disabledTint,
                     modifier = Modifier.size(30.dp),
                 )
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = if (hasActiveCard) (-dragProgressProvider()).coerceIn(0f, 1f) else 0f
+                        }
+                        .background(TrashCrimson),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(30.dp),
+                    )
+                }
             }
         }
 
@@ -950,11 +1222,7 @@ private fun SwipeActionDock(
                 Icon(
                     imageVector = Icons.AutoMirrored.Rounded.Undo,
                     contentDescription = stringResource(R.string.cd_undo),
-                    tint = if (canUndo) {
-                        UndoAmber
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-                    },
+                    tint = if (canUndo) UndoAmber else disabledTint,
                     modifier = Modifier.size(22.dp),
                 )
             }
@@ -965,22 +1233,40 @@ private fun SwipeActionDock(
             onClick = onKeepClick,
             enabled = hasActiveCard,
             shape = CircleShape,
-            color = keepContainer,
+            color = if (hasActiveCard) KeepEmerald.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainer,
             modifier = Modifier
                 .size(62.dp)
                 .graphicsLayer {
-                    scaleX = keepScale
-                    scaleY = keepScale
+                    val boost = if (hasActiveCard) dragProgressProvider().coerceIn(0f, 1f) else 0f
+                    val scale = 1f + (0.15f * boost)
+                    scaleX = scale
+                    scaleY = scale
                 }
                 .testTag("keep_action_button"),
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                 Icon(
                     imageVector = Icons.Rounded.Favorite,
                     contentDescription = stringResource(R.string.cd_keep),
-                    tint = keepIconTint,
+                    tint = if (hasActiveCard) KeepEmerald else disabledTint,
                     modifier = Modifier.size(28.dp),
                 )
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = if (hasActiveCard) dragProgressProvider().coerceIn(0f, 1f) else 0f
+                        }
+                        .background(KeepEmerald),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Favorite,
+                        contentDescription = null,
+                        tint = Color(0xFF042619),
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
             }
         }
     }

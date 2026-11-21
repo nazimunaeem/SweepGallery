@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "TindPhoto"
+rootProject.name = "SweepGallery"
 
 include(":app")

@@ -18,7 +18,7 @@ import kotlinx.coroutines.withContext
 import java.util.Calendar
 
 /**
- * Generates real JPEG sample photos directly into MediaStore (Pictures/TindPhotoSamples)
+ * Generates real JPEG sample photos directly into MediaStore (Pictures/SweepGallerySamples)
  * when explicitly requested on an empty gallery/emulator so users can immediately test
  * swiping and real MediaStore deletion.
  */
@@ -102,7 +102,7 @@ class SamplePhotoSeeder(private val context: Context) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     put(
                         MediaStore.Images.Media.RELATIVE_PATH,
-                        "${Environment.DIRECTORY_PICTURES}/TindPhotoSamples",
+                        "${Environment.DIRECTORY_PICTURES}/SweepGallerySamples",
                     )
                     put(MediaStore.Images.Media.IS_PENDING, 1)
                 }
