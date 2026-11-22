@@ -4,6 +4,9 @@
 
 **Fast, privacy-first Android gallery cleaner built with Kotlin & Jetpack Compose.**
 
+<!-- Replace YOUR_GITHUB_USERNAME/SweepGallery with your GitHub repository slug for live release & download counts -->
+[![GitHub Downloads](https://img.shields.io/github/downloads/YOUR_GITHUB_USERNAME/SweepGallery/total?style=flat-square&logo=github&label=Downloads&color=06B6D4)](https://github.com/YOUR_GITHUB_USERNAME/SweepGallery/releases)
+[![Latest Release](https://img.shields.io/github/v/release/YOUR_GITHUB_USERNAME/SweepGallery?style=flat-square&logo=github&label=Release&color=4F46E5)](https://github.com/YOUR_GITHUB_USERNAME/SweepGallery/releases/latest)
 [![Platform](https://img.shields.io/badge/Platform-Android%20(API%2024%2B)-3DDC84?style=flat-square&logo=android&logoColor=white)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)](https://developer.android.com/compose)
@@ -82,11 +85,10 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## Automated Releases (CI/CD)
 
-`.github/workflows/release-apk.yml` builds and publishes debug-signed APKs (`app-debug.apk`) on pushes to `main`/`master`, `v*` tags, or manual workflow dispatch:
+`.github/workflows/release-apk.yml` runs unit tests on pushes to `main`/`master`, `v*` tags, or manual workflow dispatch, and only publishes signed release APKs (`app-release.apk`) when signing secrets are configured (debug APKs are never published to Releases):
 
-- Decodes `debug.keystore.base64` so releases share a consistent debug signing key.
-- Uploads `SweepGallery-APK` as a workflow artifact.
-- Publishes `app-debug.apk` to **GitHub Releases**.
+- Runs `gradle :app:testDebugUnitTest` on every push.
+- When `RELEASE_KEYSTORE_BASE64`, `STORE_PASSWORD`, and `KEY_PASSWORD` secrets are set, builds `app-release.apk`, uploads `SweepGallery-Release-APK`, and publishes it to **GitHub Releases**.
 
 ---
 
