@@ -15,7 +15,9 @@ android {
   defaultConfig {
     val ciVersionCode = providers.gradleProperty("versionCode").orNull?.toIntOrNull()
     val ciVersionName = providers.gradleProperty("versionName").orNull
-    val githubRepo = (System.getenv("GITHUB_REPOSITORY") ?: "").replace("\"", "")
+    val githubRepo = (System.getenv("GITHUB_REPOSITORY") ?: "nazimunaeem/SweepGallery")
+      .ifBlank { "nazimunaeem/SweepGallery" }
+      .replace("\"", "")
 
     applicationId = "com.aistudio.tindphoto.krmxvp"
     minSdk = 24

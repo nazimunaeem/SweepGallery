@@ -4,9 +4,8 @@
 
 **Fast, privacy-first Android gallery cleaner built with Kotlin & Jetpack Compose.**
 
-<!-- Replace YOUR_GITHUB_USERNAME/SweepGallery with your GitHub repository slug for live release & download counts -->
-[![GitHub Downloads](https://img.shields.io/github/downloads/YOUR_GITHUB_USERNAME/SweepGallery/total?style=flat-square&logo=github&label=Downloads&color=06B6D4)](https://github.com/YOUR_GITHUB_USERNAME/SweepGallery/releases)
-[![Latest Release](https://img.shields.io/github/v/release/YOUR_GITHUB_USERNAME/SweepGallery?style=flat-square&logo=github&label=Release&color=4F46E5)](https://github.com/YOUR_GITHUB_USERNAME/SweepGallery/releases/latest)
+[![GitHub Downloads](https://img.shields.io/github/downloads/nazimunaeem/SweepGallery/total?style=flat-square&logo=github&label=Downloads&color=06B6D4)](https://github.com/nazimunaeem/SweepGallery/releases)
+[![Latest Release](https://img.shields.io/github/v/release/nazimunaeem/SweepGallery?style=flat-square&logo=github&label=Release&color=4F46E5)](https://github.com/nazimunaeem/SweepGallery/releases/latest)
 [![Platform](https://img.shields.io/badge/Platform-Android%20(API%2024%2B)-3DDC84?style=flat-square&logo=android&logoColor=white)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)](https://developer.android.com/compose)
@@ -114,6 +113,7 @@ SweepGallery is built on top of the following open-source libraries and typeface
 ```text
 Developer : Md. Nazim Uddin
 App       : SweepGallery (Android / Kotlin / Jetpack Compose)
+GitHub    : https://github.com/nazimunaeem/SweepGallery
 Support   : https://www.supportkori.com/nazimunaeem
 ```
 
