@@ -8,6 +8,20 @@ import java.util.Locale
 import kotlin.math.log10
 import kotlin.math.pow
 
+enum class MediaKind {
+    PHOTO,
+    VIDEO,
+}
+
+enum class SmartCategory(val label: String) {
+    ALL("All Media"),
+    BURSTS("Similar Bursts"),
+    VIDEOS("Videos"),
+    LARGE_FILES("Large >10 MB"),
+    SCREENSHOTS("Screenshots"),
+    STARRED("Starred"),
+}
+
 @Immutable
 data class PhotoItem(
     val id: Long,
@@ -21,12 +35,26 @@ data class PhotoItem(
     val albumName: String,
     val mimeType: String = "",
     val directoryPath: String = "",
+    val mediaKind: MediaKind = MediaKind.PHOTO,
+    val durationMillis: Long = 0L,
 ) {
     val effectiveDateMillis: Long =
         if (dateTakenMillis > 0L) dateTakenMillis else dateAddedSeconds * 1000L
 
+    val isVideo: Boolean
+        get() = mediaKind == MediaKind.VIDEO
+
+    val isScreenshot: Boolean
+        get() = albumName.contains("screenshot", ignoreCase = true) ||
+            directoryPath.contains("screenshot", ignoreCase = true) ||
+            displayName.startsWith("Screenshot", ignoreCase = true)
+
     val formattedSize: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
         formatFileSize(sizeBytes)
+    }
+
+    val formattedDuration: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        formatMediaDuration(durationMillis)
     }
 
     val formattedDate: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
@@ -51,11 +79,15 @@ data class PhotoItem(
 
     val resolutionWithMpLabel: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
         if (width > 0 && height > 0) {
-            val mp = (width.toLong() * height.toLong()) / 1_000_000.0
-            if (mp >= 0.1) {
-                String.format(Locale.US, "%d × %d (%.1f MP)", width, height, mp)
-            } else {
+            if (mediaKind == MediaKind.VIDEO) {
                 "$width × $height"
+            } else {
+                val mp = (width.toLong() * height.toLong()) / 1_000_000.0
+                if (mp >= 0.1) {
+                    String.format(Locale.US, "%d × %d (%.1f MP)", width, height, mp)
+                } else {
+                    "$width × $height"
+                }
             }
         } else {
             "Unknown"
@@ -67,6 +99,7 @@ data class PhotoItem(
         when {
             mimeType.contains('/') -> mimeType.substringAfter('/').uppercase(Locale.US)
             extFromName.isNotBlank() -> extFromName
+            mediaKind == MediaKind.VIDEO -> "Video"
             else -> "Image"
         }
     }
@@ -85,6 +118,7 @@ enum class SortOrder(val label: String) {
 enum class SwipeDirection {
     LEFT_TRASH,
     RIGHT_KEEP,
+    UP_FAVORITE,
 }
 
 @Immutable
@@ -98,6 +132,8 @@ data class TindPhotoStats(
     val totalDeletedCount: Int = 0,
     val totalKeptCount: Int = 0,
     val totalFreedBytes: Long = 0L,
+    val currentStreakDays: Int = 0,
+    val weeklyFreedBytes: Long = 0L,
 )
 
 @Immutable
@@ -117,6 +153,20 @@ data class MonthSummary(
     val remainingCount: Int,
     val totalBytes: Long,
     val isCompleted: Boolean,
+)
+
+@Immutable
+data class SmartCategorySummary(
+    val category: SmartCategory,
+    val count: Int,
+    val totalBytes: Long,
+)
+
+@Immutable
+data class BurstGroup(
+    val id: String,
+    val photos: List<PhotoItem>,
+    val totalBytes: Long,
 )
 
 private val photoDateFormatter = ThreadLocal.withInitial {
@@ -144,6 +194,19 @@ fun formatFileSize(bytes: Long): String {
         String.format(Locale.US, "%.1f %s", value, units[digitGroups])
     } else {
         String.format(Locale.US, "%.0f %s", value, units[digitGroups])
+    }
+}
+
+fun formatMediaDuration(durationMillis: Long): String {
+    if (durationMillis <= 0L) return "0:00"
+    val totalSeconds = (durationMillis / 1000L).coerceAtLeast(1L)
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%d:%02d", minutes, seconds)
     }
 }
 

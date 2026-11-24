@@ -38,4 +38,10 @@
     <string name="metadata_file_details">File Details</string>
     <string name="metadata_camera_exif">Camera &amp; EXIF</string>
     <string name="no_files_app_found">Could not open Files app for this folder</string>
+    <string name="stamp_favorite">STAR</string>
+    <string name="cd_favorite">Swipe up to star favorite</string>
+    <string name="share_photo">Share</string>
+    <string name="move_to_system_trash">Move to System Trash</string>
+    <string name="limited_access_banner">Limited gallery access — tap to select more media</string>
+    <string name="compare_burst">Compare Burst</string>
 </resources>

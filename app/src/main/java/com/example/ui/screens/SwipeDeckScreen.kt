@@ -39,9 +39,14 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FilterNone
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.ZoomIn
 import androidx.compose.material3.Button
@@ -91,8 +96,10 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import coil.size.Precision
 import com.example.R
+import com.example.model.BurstGroup
 import com.example.model.MonthSummary
 import com.example.model.PhotoItem
+import com.example.model.SmartCategory
 import com.example.model.SortOrder
 import com.example.model.SwipeDirection
 import com.example.model.formatFileSize
@@ -100,6 +107,8 @@ import com.example.ui.components.TindPhotoArtwork
 import com.example.ui.components.TindPhotoLogo
 import com.example.ui.theme.FlameCoral
 import com.example.ui.theme.KeepEmerald
+import com.example.ui.theme.SweepLogoAccentDark
+import com.example.ui.theme.SweepLogoStart
 import com.example.ui.theme.TrashCrimson
 import com.example.ui.theme.UndoAmber
 import com.example.ui.util.SwipeHaptics
@@ -110,8 +119,10 @@ import com.example.ui.viewmodel.TindPhotoUiState
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.max
 
 private const val DECK_IMAGE_MAX_DIM = 1080
+private val StarGold = Color(0xFFFFD54F)
 
 private data class ExitingCardState(
     val photo: PhotoItem,
@@ -135,6 +146,10 @@ fun SwipeDeckScreen(
     onIncludeReviewed: () -> Unit,
     onOpenTrashTab: () -> Unit,
     modifier: Modifier = Modifier,
+    onRequestMoreMedia: () -> Unit = {},
+    onSelectSmartCategory: (SmartCategory) -> Unit = {},
+    onOpenBurstCompare: (BurstGroup) -> Unit = {},
+    onOpenJumpSheet: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val swipeHaptics = rememberSwipeHaptics()
@@ -203,9 +218,60 @@ fun SwipeDeckScreen(
             onSelectSortOrder = onSelectSortOrder,
             onRefresh = onRefresh,
             onOpenTrashTab = onOpenTrashTab,
+            onOpenJumpSheet = onOpenJumpSheet,
         )
 
-        // Month-wise & Album Filter Strip
+        // Android 14+ Partial Gallery Access Banner
+        if (state.isLimitedAccess) {
+            Surface(
+                onClick = onRequestMoreMedia,
+                shape = CircleShape,
+                color = SweepLogoStart.copy(alpha = 0.16f),
+                border = BorderStroke(1.dp, SweepLogoAccentDark.copy(alpha = 0.45f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 640.dp)
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .testTag("limited_access_banner"),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.LockOpen,
+                        contentDescription = null,
+                        tint = SweepLogoAccentDark,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        text = stringResource(R.string.limited_access_banner),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+
+        // Smart Categories + Month-wise & Album Filter Strips
+        val visibleSmartCategories = remember(state.smartCategories, state.selectedSmartCategory) {
+            state.smartCategories.filter {
+                it.category == SmartCategory.ALL ||
+                    it.category == state.selectedSmartCategory ||
+                    it.count > 0
+            }
+        }
+        if (visibleSmartCategories.size > 1) {
+            SmartCategoryStrip(
+                categories = visibleSmartCategories,
+                selectedCategory = state.selectedSmartCategory,
+                onSelectSmartCategory = onSelectSmartCategory,
+            )
+        }
+
         if (state.months.isNotEmpty() || state.albums.size > 1) {
             FilterStrip(
                 state = state,
@@ -231,7 +297,7 @@ fun SwipeDeckScreen(
                     ) {
                         CircularProgressIndicator(color = FlameCoral)
                         Text(
-                            text = "Scanning your photos…",
+                            text = "Scanning your media…",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -243,6 +309,8 @@ fun SwipeDeckScreen(
                         hasAnyPhotosOnDevice = state.allPhotosCount > 0,
                         isAllAlbum = state.selectedAlbum == ALBUM_ALL,
                         isSpecificMonth = state.selectedMonth != MONTH_ALL,
+                        isSmartCategoryActive = state.selectedSmartCategory != SmartCategory.ALL,
+                        selectedSmartCategoryLabel = state.selectedSmartCategory.label,
                         selectedMonthLabel = activeMonth?.label,
                         isSelectedMonthCompleted = activeMonth?.isCompleted == true,
                         nextUnfinishedMonth = state.nextUnfinishedMonth,
@@ -253,6 +321,7 @@ fun SwipeDeckScreen(
                         onIncludeReviewed = onIncludeReviewed,
                         onShowAllAlbums = { onSelectAlbum(ALBUM_ALL) },
                         onShowAllMonths = { onSelectMonth(MONTH_ALL) },
+                        onShowAllSmartCategories = { onSelectSmartCategory(SmartCategory.ALL) },
                         onSelectNextMonth = { month -> onSelectMonth(month.key) },
                         onOpenTrashTab = onOpenTrashTab,
                     )
@@ -261,10 +330,14 @@ fun SwipeDeckScreen(
                     val visibleCards = remember(activeDeckPhotos) { activeDeckPhotos.take(3) }
                     visibleCards.asReversed().forEach { photo ->
                         val stackIndex = visibleCards.indexOf(photo)
+                        val burstGroup = state.burstGroupByPhotoId[photo.id]
+                        val isFavorite = photo.id in state.favoritePhotoIds
                         key(photo.id) {
                             SwipeablePhotoCard(
                                 photo = photo,
                                 stackIndex = stackIndex,
+                                isFavorite = isFavorite,
+                                burstGroup = burstGroup,
                                 swipeHaptics = swipeHaptics,
                                 dragProgressProvider = { dragProgressState.floatValue },
                                 onDragProgress = { signedProgress ->
@@ -275,6 +348,9 @@ fun SwipeDeckScreen(
                                 },
                                 onTapZoom = { onOpenLightbox(photo) },
                                 onTapInfo = { onInspectPhoto(photo) },
+                                onTapBurst = {
+                                    if (burstGroup != null) onOpenBurstCompare(burstGroup)
+                                },
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }
@@ -300,6 +376,7 @@ fun SwipeDeckScreen(
         SwipeActionDock(
             hasActiveCard = topPhoto != null && !state.isLoading,
             canUndo = state.canUndo,
+            isTopFavorite = topPhoto?.id in state.favoritePhotoIds,
             dragProgressProvider = { dragProgressState.floatValue },
             onUndo = {
                 exitingCards = emptyList()
@@ -313,6 +390,12 @@ fun SwipeDeckScreen(
                     commitSwipe(photo, SwipeDirection.LEFT_TRASH, 0f, 0f)
                 }
             },
+            onFavoriteClick = {
+                topPhoto?.let { photo ->
+                    swipeHaptics.onKeepCommitted()
+                    commitSwipe(photo, SwipeDirection.UP_FAVORITE, 0f, -80f)
+                }
+            },
             onKeepClick = {
                 topPhoto?.let { photo ->
                     swipeHaptics.onKeepCommitted()
@@ -320,6 +403,51 @@ fun SwipeDeckScreen(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun SmartCategoryStrip(
+    categories: List<com.example.model.SmartCategorySummary>,
+    selectedCategory: SmartCategory,
+    onSelectSmartCategory: (SmartCategory) -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(categories, key = { it.category.name }) { summary ->
+            val selected = summary.category == selectedCategory
+            FilterChip(
+                selected = selected,
+                onClick = { onSelectSmartCategory(summary.category) },
+                label = {
+                    val labelText = if (summary.category == SmartCategory.ALL) {
+                        "${summary.category.label} (${summary.count})"
+                    } else {
+                        "${summary.category.label} (${summary.count})"
+                    }
+                    Text(
+                        text = labelText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = SweepLogoStart.copy(alpha = 0.22f),
+                    selectedLabelColor = SweepLogoAccentDark,
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = selected,
+                    borderColor = MaterialTheme.colorScheme.outlineVariant,
+                    selectedBorderColor = SweepLogoAccentDark.copy(alpha = 0.7f),
+                ),
+                modifier = Modifier.testTag("smart_chip_${summary.category.name}"),
+            )
+        }
     }
 }
 
@@ -485,6 +613,7 @@ private fun SwipeTopBar(
     onSelectSortOrder: (SortOrder) -> Unit,
     onRefresh: () -> Unit,
     onOpenTrashTab: () -> Unit,
+    onOpenJumpSheet: () -> Unit,
 ) {
     var sortMenuExpanded by remember { mutableStateOf(false) }
 
@@ -500,8 +629,35 @@ private fun SwipeTopBar(
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            if (state.deckPhotos.isNotEmpty()) {
+                Surface(
+                    onClick = onOpenJumpSheet,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.testTag("deck_jump_button"),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Layers,
+                            contentDescription = "Jump to item in deck",
+                            tint = SweepLogoAccentDark,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Text(
+                            text = "${state.deckPhotos.size} left",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+
             if (state.trashQueue.isNotEmpty()) {
                 Surface(
                     onClick = onOpenTrashTab,
@@ -511,15 +667,15 @@ private fun SwipeTopBar(
                     modifier = Modifier.testTag("top_trash_pill"),
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.DeleteOutline,
                             contentDescription = null,
                             tint = TrashCrimson,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(15.dp),
                         )
                         Text(
                             text = "${state.trashQueue.size} • ${formatFileSize(state.trashTotalBytes)}",
@@ -538,7 +694,7 @@ private fun SwipeTopBar(
                     modifier = Modifier.testTag("sort_order_button"),
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
@@ -546,7 +702,7 @@ private fun SwipeTopBar(
                             imageVector = Icons.Rounded.SwapVert,
                             contentDescription = "Sort photos",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(15.dp),
                         )
                         Text(
                             text = state.sortOrder.label,
@@ -600,12 +756,15 @@ private fun SwipeTopBar(
 private fun SwipeablePhotoCard(
     photo: PhotoItem,
     stackIndex: Int,
+    isFavorite: Boolean,
+    burstGroup: BurstGroup?,
     swipeHaptics: SwipeHaptics,
     dragProgressProvider: () -> Float,
     onDragProgress: (Float) -> Unit,
     onCommitSwipe: (SwipeDirection, Float, Float) -> Unit,
     onTapZoom: () -> Unit,
     onTapInfo: () -> Unit,
+    onTapBurst: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isTop = stackIndex == 0
@@ -679,17 +838,24 @@ private fun SwipeablePhotoCard(
             var crossedThreshold = false
             detectDragGestures(
                 onDragStart = {
-                    crossedThreshold = abs(offsetX.value) >= thresholdPx
+                    crossedThreshold = abs(offsetX.value) >= thresholdPx || offsetY.value <= -thresholdPx
                     velocityTracker.resetTracking()
                 },
                 onDragEnd = {
                     val currentX = offsetX.value
                     val currentY = offsetY.value
-                    val velocityX = velocityTracker.calculateVelocity().x
+                    val velocity = velocityTracker.calculateVelocity()
+                    val velocityX = velocity.x
+                    val velocityY = velocity.y
+
                     val shouldKeep = currentX > thresholdPx ||
                         (velocityX > flickVelocityPx && currentX > minFlickDistancePx)
                     val shouldTrash = currentX < -thresholdPx ||
                         (velocityX < -flickVelocityPx && currentX < -minFlickDistancePx)
+                    val shouldFavorite = (
+                        (currentY < -thresholdPx && abs(currentY) > abs(currentX) * 1.05f) ||
+                            (velocityY < -flickVelocityPx && currentY < -minFlickDistancePx && abs(velocityY) > abs(velocityX) * 1.15f)
+                        ) && !shouldKeep && !shouldTrash
 
                     when {
                         shouldKeep -> {
@@ -699,6 +865,10 @@ private fun SwipeablePhotoCard(
                         shouldTrash -> {
                             swipeHaptics.onDeleteCommitted()
                             onCommitSwipe(SwipeDirection.LEFT_TRASH, currentX, currentY)
+                        }
+                        shouldFavorite -> {
+                            swipeHaptics.onKeepCommitted()
+                            onCommitSwipe(SwipeDirection.UP_FAVORITE, currentX, currentY)
                         }
                         else -> {
                             crossedThreshold = false
@@ -753,19 +923,27 @@ private fun SwipeablePhotoCard(
                 onDrag = { change, dragAmount ->
                     change.consume()
                     val nextX = offsetX.value + dragAmount.x
-                    val nextY = (offsetY.value + dragAmount.y * 0.32f).coerceIn(-120f, 120f)
+                    val nextY = (offsetY.value + dragAmount.y * 0.72f).coerceIn(-260f, 120f)
                     velocityTracker.addPosition(change.uptimeMillis, Offset(nextX, nextY))
                     scope.launch(start = CoroutineStart.UNDISPATCHED) {
                         offsetX.snapTo(nextX)
                         offsetY.snapTo(nextY)
                     }
-                    val signedProgress = (nextX / thresholdPx).coerceIn(-1f, 1f)
-                    onDragProgress(signedProgress)
+                    val horizontalProgress = (nextX / thresholdPx).coerceIn(-1f, 1f)
+                    val upProgress = (-nextY / thresholdPx).coerceIn(0f, 1f)
+                    val dominantProgress = if (abs(horizontalProgress) >= upProgress) {
+                        horizontalProgress
+                    } else {
+                        upProgress
+                    }
+                    onDragProgress(dominantProgress)
 
-                    val nowCrossed = abs(nextX) >= thresholdPx
+                    val nowCrossed = abs(nextX) >= thresholdPx || nextY <= -thresholdPx
                     if (nowCrossed && !crossedThreshold) {
                         crossedThreshold = true
-                        swipeHaptics.onThresholdCrossed(isDeleteDirection = nextX < 0f)
+                        swipeHaptics.onThresholdCrossed(
+                            isDeleteDirection = nextX < 0f && abs(nextX) >= abs(nextY),
+                        )
                     } else if (!nowCrossed && crossedThreshold) {
                         crossedThreshold = false
                     }
@@ -883,6 +1061,112 @@ private fun SwipeablePhotoCard(
                         .border(2.5.dp, TrashCrimson, MaterialTheme.shapes.large),
                 )
 
+                // Real-time STAR FAVORITE upward wash & border glow (up drag)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val horizLock = (abs(offsetX.value) / thresholdPx).coerceIn(0f, 1f)
+                            val upAlpha = ((-offsetY.value - 14f) / (thresholdPx - 14f)).coerceIn(0f, 1f)
+                            alpha = upAlpha * (1f - horizLock)
+                        }
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    StarGold.copy(alpha = 0.30f),
+                                    Color.Transparent,
+                                ),
+                            ),
+                        )
+                        .border(2.5.dp, StarGold, MaterialTheme.shapes.large),
+                )
+
+                // Top-left metadata pills (Video duration, Burst compare, Starred)
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(14.dp)
+                        .graphicsLayer {
+                            val dragFade = max(
+                                abs(offsetX.value) / (thresholdPx * 0.45f),
+                                (-offsetY.value) / (thresholdPx * 0.45f),
+                            ).coerceIn(0f, 1f)
+                            alpha = 1f - dragFade
+                        },
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (photo.isVideo) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.65f),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PlayArrow,
+                                    contentDescription = "Video",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                                Text(
+                                    text = photo.formattedDuration,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+
+                    if (burstGroup != null && burstGroup.photos.size > 1) {
+                        Surface(
+                            onClick = onTapBurst,
+                            shape = CircleShape,
+                            color = SweepLogoStart.copy(alpha = 0.88f),
+                            modifier = Modifier.testTag("card_burst_badge"),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.FilterNone,
+                                    contentDescription = stringResource(R.string.compare_burst),
+                                    tint = Color.White,
+                                    modifier = Modifier.size(13.dp),
+                                )
+                                Text(
+                                    text = "Burst (${burstGroup.photos.size})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+
+                    if (isFavorite) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.62f),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Star,
+                                contentDescription = "Starred photo",
+                                tint = StarGold,
+                                modifier = Modifier
+                                    .padding(6.dp)
+                                    .size(15.dp),
+                            )
+                        }
+                    }
+                }
+
                 // Top-right Zoom pill hint (fades out while dragging so DELETE overlay stays clear)
                 Surface(
                     onClick = onTapZoom,
@@ -892,7 +1176,11 @@ private fun SwipeablePhotoCard(
                         .align(Alignment.TopEnd)
                         .padding(14.dp)
                         .graphicsLayer {
-                            alpha = 1f - (abs(offsetX.value) / (thresholdPx * 0.45f)).coerceIn(0f, 1f)
+                            val dragFade = max(
+                                abs(offsetX.value) / (thresholdPx * 0.45f),
+                                (-offsetY.value) / (thresholdPx * 0.45f),
+                            ).coerceIn(0f, 1f)
+                            alpha = 1f - dragFade
                         },
                 ) {
                     Icon(
@@ -927,6 +1215,22 @@ private fun SwipeablePhotoCard(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(end = 24.dp, top = 32.dp),
+                )
+
+                // Fading STAR Overlay Stamp (top-center)
+                SwipeStampBadge(
+                    label = stringResource(R.string.stamp_favorite),
+                    icon = Icons.Rounded.Star,
+                    color = StarGold,
+                    rotationDegrees = 0f,
+                    alphaProvider = {
+                        val horizLock = (abs(offsetX.value) / thresholdPx).coerceIn(0f, 1f)
+                        val upAlpha = ((-offsetY.value - 14f) / (thresholdPx - 14f)).coerceIn(0f, 1f)
+                        upAlpha * (1f - horizLock)
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 40.dp),
                 )
             }
 
@@ -1008,10 +1312,18 @@ private fun ExitingPhotoCard(
     val context = LocalContext.current
     val density = LocalDensity.current
     val flyOutDistance = remember(density) { with(density) { 460.dp.toPx() } }
-    val isRight = exiting.direction == SwipeDirection.RIGHT_KEEP
-    val targetX = if (isRight) flyOutDistance else -flyOutDistance
+    val targetX = when (exiting.direction) {
+        SwipeDirection.RIGHT_KEEP -> flyOutDistance
+        SwipeDirection.LEFT_TRASH -> -flyOutDistance
+        SwipeDirection.UP_FAVORITE -> exiting.startX * 0.4f
+    }
+    val targetY = when (exiting.direction) {
+        SwipeDirection.UP_FAVORITE -> -flyOutDistance
+        SwipeDirection.RIGHT_KEEP, SwipeDirection.LEFT_TRASH -> exiting.startY + 28f
+    }
 
     val animX = remember(exiting.photo.id) { Animatable(exiting.startX) }
+    val animY = remember(exiting.photo.id) { Animatable(exiting.startY) }
     val progressAnim = remember(exiting.photo.id) { Animatable(0f) }
 
     val cacheKey = "deck_${exiting.photo.id}"
@@ -1027,9 +1339,15 @@ private fun ExitingPhotoCard(
     }
 
     LaunchedEffect(exiting.photo.id) {
-        val flyOutJob = launch {
+        val flyXJob = launch {
             animX.animateTo(
                 targetX,
+                animationSpec = tween(durationMillis = 155, easing = FastOutLinearInEasing),
+            )
+        }
+        val flyYJob = launch {
+            animY.animateTo(
+                targetY,
                 animationSpec = tween(durationMillis = 155, easing = FastOutLinearInEasing),
             )
         }
@@ -1039,9 +1357,26 @@ private fun ExitingPhotoCard(
                 animationSpec = tween(durationMillis = 155, easing = FastOutLinearInEasing),
             )
         }
-        flyOutJob.join()
+        flyXJob.join()
+        flyYJob.join()
         fadeJob.join()
         onFinished()
+    }
+
+    val accentColor = when (exiting.direction) {
+        SwipeDirection.RIGHT_KEEP -> KeepEmerald
+        SwipeDirection.LEFT_TRASH -> TrashCrimson
+        SwipeDirection.UP_FAVORITE -> StarGold
+    }
+    val stampLabel = when (exiting.direction) {
+        SwipeDirection.RIGHT_KEEP -> stringResource(R.string.stamp_keep)
+        SwipeDirection.LEFT_TRASH -> stringResource(R.string.stamp_trash)
+        SwipeDirection.UP_FAVORITE -> stringResource(R.string.stamp_favorite)
+    }
+    val stampIcon = when (exiting.direction) {
+        SwipeDirection.RIGHT_KEEP -> Icons.Rounded.Favorite
+        SwipeDirection.LEFT_TRASH -> Icons.Rounded.DeleteOutline
+        SwipeDirection.UP_FAVORITE -> Icons.Rounded.Star
     }
 
     Surface(
@@ -1049,8 +1384,12 @@ private fun ExitingPhotoCard(
             .graphicsLayer {
                 val x = animX.value
                 translationX = x
-                translationY = exiting.startY + (progressAnim.value * 28f)
-                rotationZ = (x / 24f).coerceIn(-16f, 16f)
+                translationY = animY.value
+                rotationZ = if (exiting.direction == SwipeDirection.UP_FAVORITE) {
+                    0f
+                } else {
+                    (x / 24f).coerceIn(-16f, 16f)
+                }
                 alpha = (1f - (progressAnim.value * 0.45f)).coerceIn(0f, 1f)
             }
             .clip(MaterialTheme.shapes.large),
@@ -1077,35 +1416,35 @@ private fun ExitingPhotoCard(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        if (isRight) {
-                            Brush.horizontalGradient(
-                                listOf(KeepEmerald.copy(alpha = 0.08f), KeepEmerald.copy(alpha = 0.34f)),
-                            )
-                        } else {
-                            Brush.horizontalGradient(
-                                listOf(TrashCrimson.copy(alpha = 0.36f), TrashCrimson.copy(alpha = 0.08f)),
-                            )
-                        },
-                    )
+                    .background(accentColor.copy(alpha = 0.22f))
                     .border(
                         width = 2.5.dp,
-                        color = if (isRight) KeepEmerald else TrashCrimson,
+                        color = accentColor,
                         shape = MaterialTheme.shapes.large,
                     ),
             )
 
             SwipeStampBadge(
-                label = stringResource(if (isRight) R.string.stamp_keep else R.string.stamp_trash),
-                icon = if (isRight) Icons.Rounded.Favorite else Icons.Rounded.DeleteOutline,
-                color = if (isRight) KeepEmerald else TrashCrimson,
-                rotationDegrees = if (isRight) -14f else 14f,
+                label = stampLabel,
+                icon = stampIcon,
+                color = accentColor,
+                rotationDegrees = when (exiting.direction) {
+                    SwipeDirection.RIGHT_KEEP -> -14f
+                    SwipeDirection.LEFT_TRASH -> 14f
+                    SwipeDirection.UP_FAVORITE -> 0f
+                },
                 alphaProvider = { 1f },
                 modifier = Modifier
-                    .align(if (isRight) Alignment.TopStart else Alignment.TopEnd)
+                    .align(
+                        when (exiting.direction) {
+                            SwipeDirection.RIGHT_KEEP -> Alignment.TopStart
+                            SwipeDirection.LEFT_TRASH -> Alignment.TopEnd
+                            SwipeDirection.UP_FAVORITE -> Alignment.TopCenter
+                        },
+                    )
                     .padding(
-                        start = if (isRight) 24.dp else 0.dp,
-                        end = if (isRight) 0.dp else 24.dp,
+                        start = if (exiting.direction == SwipeDirection.RIGHT_KEEP) 24.dp else 0.dp,
+                        end = if (exiting.direction == SwipeDirection.LEFT_TRASH) 24.dp else 0.dp,
                         top = 32.dp,
                     ),
             )
@@ -1159,9 +1498,11 @@ private fun SwipeStampBadge(
 private fun SwipeActionDock(
     hasActiveCard: Boolean,
     canUndo: Boolean,
+    isTopFavorite: Boolean,
     dragProgressProvider: () -> Float,
     onUndo: () -> Unit,
     onTrashClick: () -> Unit,
+    onFavoriteClick: () -> Unit,
     onKeepClick: () -> Unit,
 ) {
     val disabledTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
@@ -1169,7 +1510,7 @@ private fun SwipeActionDock(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .widthIn(max = 340.dp)
+            .widthIn(max = 380.dp)
             .padding(horizontal = 24.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -1181,7 +1522,7 @@ private fun SwipeActionDock(
             shape = CircleShape,
             color = if (hasActiveCard) TrashCrimson.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainer,
             modifier = Modifier
-                .size(62.dp)
+                .size(60.dp)
                 .graphicsLayer {
                     val boost = if (hasActiveCard) (-dragProgressProvider()).coerceIn(0f, 1f) else 0f
                     val scale = 1f + (0.15f * boost)
@@ -1195,7 +1536,7 @@ private fun SwipeActionDock(
                     imageVector = Icons.Rounded.Close,
                     contentDescription = stringResource(R.string.cd_trash),
                     tint = if (hasActiveCard) TrashCrimson else disabledTint,
-                    modifier = Modifier.size(30.dp),
+                    modifier = Modifier.size(28.dp),
                 )
                 Box(
                     contentAlignment = Alignment.Center,
@@ -1210,13 +1551,13 @@ private fun SwipeActionDock(
                         imageVector = Icons.Rounded.Close,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(30.dp),
+                        modifier = Modifier.size(28.dp),
                     )
                 }
             }
         }
 
-        // Centered Undo Button
+        // Undo Button
         Surface(
             onClick = onUndo,
             enabled = canUndo,
@@ -1240,6 +1581,30 @@ private fun SwipeActionDock(
             }
         }
 
+        // Star Favorite Button (Swipe Up equivalent)
+        Surface(
+            onClick = onFavoriteClick,
+            enabled = hasActiveCard,
+            shape = CircleShape,
+            color = if (hasActiveCard) {
+                StarGold.copy(alpha = if (isTopFavorite) 0.28f else 0.14f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
+            },
+            modifier = Modifier
+                .size(48.dp)
+                .testTag("favorite_action_button"),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Rounded.Star,
+                    contentDescription = stringResource(R.string.cd_favorite),
+                    tint = if (hasActiveCard) StarGold else disabledTint,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+
         // Simple & Smart Heart (Keep) Button
         Surface(
             onClick = onKeepClick,
@@ -1247,7 +1612,7 @@ private fun SwipeActionDock(
             shape = CircleShape,
             color = if (hasActiveCard) KeepEmerald.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainer,
             modifier = Modifier
-                .size(62.dp)
+                .size(60.dp)
                 .graphicsLayer {
                     val boost = if (hasActiveCard) dragProgressProvider().coerceIn(0f, 1f) else 0f
                     val scale = 1f + (0.15f * boost)
@@ -1261,7 +1626,7 @@ private fun SwipeActionDock(
                     imageVector = Icons.Rounded.Favorite,
                     contentDescription = stringResource(R.string.cd_keep),
                     tint = if (hasActiveCard) KeepEmerald else disabledTint,
-                    modifier = Modifier.size(28.dp),
+                    modifier = Modifier.size(26.dp),
                 )
                 Box(
                     contentAlignment = Alignment.Center,
@@ -1276,7 +1641,7 @@ private fun SwipeActionDock(
                         imageVector = Icons.Rounded.Favorite,
                         contentDescription = null,
                         tint = Color(0xFF042619),
-                        modifier = Modifier.size(28.dp),
+                        modifier = Modifier.size(26.dp),
                     )
                 }
             }
@@ -1289,6 +1654,8 @@ private fun EmptyDeckCard(
     hasAnyPhotosOnDevice: Boolean,
     isAllAlbum: Boolean,
     isSpecificMonth: Boolean,
+    isSmartCategoryActive: Boolean,
+    selectedSmartCategoryLabel: String,
     selectedMonthLabel: String?,
     isSelectedMonthCompleted: Boolean,
     nextUnfinishedMonth: MonthSummary?,
@@ -1299,6 +1666,7 @@ private fun EmptyDeckCard(
     onIncludeReviewed: () -> Unit,
     onShowAllAlbums: () -> Unit,
     onShowAllMonths: () -> Unit,
+    onShowAllSmartCategories: () -> Unit,
     onSelectNextMonth: (MonthSummary) -> Unit,
     onOpenTrashTab: () -> Unit,
 ) {
@@ -1339,6 +1707,7 @@ private fun EmptyDeckCard(
                 text = when {
                     !hasAnyPhotosOnDevice -> stringResource(R.string.empty_gallery_title)
                     isSpecificMonth && selectedMonthLabel != null -> "$selectedMonthLabel Done"
+                    isSmartCategoryActive -> "$selectedSmartCategoryLabel Clear"
                     else -> stringResource(R.string.empty_deck_title)
                 },
                 style = MaterialTheme.typography.headlineSmall,
@@ -1421,6 +1790,19 @@ private fun EmptyDeckCard(
                         Icon(Icons.Rounded.CalendarMonth, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("Next: ${nextUnfinishedMonth.label} (${nextUnfinishedMonth.remainingCount})")
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+                if (isSmartCategoryActive) {
+                    OutlinedButton(
+                        onClick = onShowAllSmartCategories,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("show_all_smart_category_button"),
+                        shape = CircleShape,
+                    ) {
+                        Text("Show All Media")
                     }
                     Spacer(modifier = Modifier.height(10.dp))
                 }

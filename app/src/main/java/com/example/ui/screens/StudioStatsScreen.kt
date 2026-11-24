@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -21,18 +22,26 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FilterNone
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LocalCafe
+import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PhotoSizeSelectLarge
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Screenshot
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -60,15 +69,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
 import com.example.R
 import com.example.model.AlbumSummary
 import com.example.model.MonthSummary
+import com.example.model.SmartCategory
+import com.example.model.SmartCategorySummary
 import com.example.model.SortOrder
 import com.example.model.formatFileSize
 import com.example.ui.theme.FlameCoral
@@ -78,6 +91,7 @@ import com.example.ui.theme.SweepLogoAccentDark
 import com.example.ui.theme.SweepLogoAccentLight
 import com.example.ui.theme.SweepLogoStart
 import com.example.ui.theme.TrashCrimson
+import com.example.ui.theme.UndoAmber
 import com.example.ui.viewmodel.MONTH_ALL
 import com.example.ui.viewmodel.TindPhotoUiState
 import com.example.ui.viewmodel.UpdateUiState
@@ -100,6 +114,9 @@ fun StudioStatsScreen(
     onCheckForUpdates: () -> Unit,
     onOpenUpdateDialog: () -> Unit,
     modifier: Modifier = Modifier,
+    onSelectSmartCategoryAndSwipe: (SmartCategory) -> Unit = {},
+    onSetUseSystemTrash: (Boolean) -> Unit = {},
+    onSetAutoCheckUpdates: (Boolean) -> Unit = {},
 ) {
     val specificMonths = state.months.filter { it.key != MONTH_ALL }
     var selectedBrowseTab by rememberSaveable { mutableStateOf(StudioBrowseTab.MONTH) }
@@ -128,7 +145,7 @@ fun StudioStatsScreen(
                         style = MaterialTheme.typography.headlineMedium,
                     )
                     Text(
-                        text = "Track space reclaimed and filter by month or album",
+                        text = "Track space reclaimed and target smart cleanup categories",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -154,6 +171,32 @@ fun StudioStatsScreen(
                 )
             }
 
+            // Cleanup Streak & Weekly Milestone Card
+            item {
+                StreakMilestoneCard(
+                    streakDays = state.stats.currentStreakDays,
+                    weeklyFreedBytes = state.stats.weeklyFreedBytes,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 680.dp),
+                )
+            }
+
+            // Smart Cleanup Categories Grid
+            val smartQuickCategories = state.smartCategories.filter { it.category != SmartCategory.ALL }
+            if (smartQuickCategories.isNotEmpty()) {
+                item {
+                    SmartCategoriesCard(
+                        categories = smartQuickCategories,
+                        selectedCategory = state.selectedSmartCategory,
+                        onSelectCategory = onSelectSmartCategoryAndSwipe,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = 680.dp),
+                    )
+                }
+            }
+
             // Preferences & Controls Card
             item {
                 PreferencesCard(
@@ -161,6 +204,7 @@ fun StudioStatsScreen(
                     onSetSortOrder = onSetSortOrder,
                     onSetIncludeReviewed = onSetIncludeReviewed,
                     onSetDarkMode = onSetDarkMode,
+                    onSetUseSystemTrash = onSetUseSystemTrash,
                     onResetKeptHistory = onResetKeptHistory,
                     onSeedSamples = onSeedSamples,
                     modifier = Modifier
@@ -175,6 +219,7 @@ fun StudioStatsScreen(
                     state = state,
                     onCheckForUpdates = onCheckForUpdates,
                     onOpenUpdateDialog = onOpenUpdateDialog,
+                    onSetAutoCheckUpdates = onSetAutoCheckUpdates,
                     modifier = Modifier
                         .fillMaxWidth()
                         .widthIn(max = 680.dp),
@@ -318,6 +363,204 @@ fun StudioStatsScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun StreakMilestoneCard(
+    streakDays: Int,
+    weeklyFreedBytes: Long,
+    modifier: Modifier = Modifier,
+) {
+    val milestoneBytes = when {
+        weeklyFreedBytes < 500L * 1024L * 1024L -> 500L * 1024L * 1024L
+        weeklyFreedBytes < 1024L * 1024L * 1024L -> 1024L * 1024L * 1024L
+        else -> 5L * 1024L * 1024L * 1024L
+    }
+    val progress = (weeklyFreedBytes.toFloat() / milestoneBytes.toFloat()).coerceIn(0f, 1f)
+
+    Surface(
+        modifier = modifier.testTag("streak_milestone_card"),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(UndoAmber.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.LocalFireDepartment,
+                            contentDescription = null,
+                            tint = UndoAmber,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = if (streakDays > 0) "$streakDays-Day Cleanup Streak" else "Start a Cleanup Streak",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            text = if (streakDays > 0) {
+                                "Keep swiping daily to build your streak"
+                            } else {
+                                "Swipe photos today to unlock Day 1"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "Weekly Storage Goal",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = "${formatFileSize(weeklyFreedBytes)} / ${formatFileSize(milestoneBytes)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = KeepEmerald,
+                    )
+                }
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(CircleShape),
+                    color = KeepEmerald,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmartCategoriesCard(
+    categories: List<SmartCategorySummary>,
+    selectedCategory: SmartCategory,
+    onSelectCategory: (SmartCategory) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.testTag("smart_categories_card"),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "Smart Cleanup Categories",
+                style = MaterialTheme.typography.titleMedium,
+            )
+
+            categories.chunked(2).forEach { rowItems ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    rowItems.forEach { summary ->
+                        val isSelected = summary.category == selectedCategory
+                        val (icon, tint) = smartCategoryVisual(summary.category)
+                        Surface(
+                            onClick = { onSelectCategory(summary.category) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("smart_category_card_${summary.category.name}"),
+                            shape = MaterialTheme.shapes.medium,
+                            color = if (isSelected) {
+                                tint.copy(alpha = 0.14f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isSelected) tint.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant,
+                            ),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(tint.copy(alpha = 0.16f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = null,
+                                        tint = tint,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = summary.category.label,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = "${summary.count} • ${formatFileSize(summary.totalBytes)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (rowItems.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun smartCategoryVisual(category: SmartCategory): Pair<ImageVector, Color> {
+    return when (category) {
+        SmartCategory.BURSTS -> Icons.Rounded.FilterNone to SweepLogoAccentDark
+        SmartCategory.VIDEOS -> Icons.Rounded.Videocam to FlameCoral
+        SmartCategory.LARGE_FILES -> Icons.Rounded.PhotoSizeSelectLarge to UndoAmber
+        SmartCategory.SCREENSHOTS -> Icons.Rounded.Screenshot to KeepEmerald
+        SmartCategory.STARRED -> Icons.Rounded.Star to Color(0xFFFFD54F)
+        SmartCategory.ALL -> Icons.Rounded.Folder to FlameCoral
     }
 }
 
@@ -615,7 +858,7 @@ private fun StorageImpactCard(
 
 @Composable
 private fun StatPill(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     label: String,
     value: String,
     accent: Color,
@@ -666,6 +909,7 @@ private fun PreferencesCard(
     onSetSortOrder: (SortOrder) -> Unit,
     onSetIncludeReviewed: (Boolean) -> Unit,
     onSetDarkMode: (Boolean) -> Unit,
+    onSetUseSystemTrash: (Boolean) -> Unit,
     onResetKeptHistory: () -> Unit,
     onSeedSamples: () -> Unit,
     modifier: Modifier = Modifier,
@@ -769,6 +1013,42 @@ private fun PreferencesCard(
                     onCheckedChange = onSetDarkMode,
                     modifier = Modifier.testTag("dark_mode_switch"),
                 )
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Column {
+                            Text(
+                                text = "Move to System Trash (30 days)",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                text = "Recoverable via device Trash instead of permanent delete",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = state.useSystemTrash,
+                        onCheckedChange = onSetUseSystemTrash,
+                        modifier = Modifier.testTag("system_trash_switch"),
+                    )
+                }
             }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -914,8 +1194,13 @@ private fun AppUpdatesCard(
     state: TindPhotoUiState,
     onCheckForUpdates: () -> Unit,
     onOpenUpdateDialog: () -> Unit,
+    onSetAutoCheckUpdates: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val uriHandler = LocalUriHandler.current
+    val repoSlug = BuildConfig.GITHUB_REPO.ifBlank { "nazimunaeem/SweepGallery" }
+    val releasesUrl = "https://github.com/$repoSlug/releases"
+
     Surface(
         modifier = modifier,
         shape = MaterialTheme.shapes.large,
@@ -929,24 +1214,126 @@ private fun AppUpdatesCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.SystemUpdate,
-                    contentDescription = null,
-                    tint = FlameCoral,
-                )
-                Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.SystemUpdate,
+                        contentDescription = null,
+                        tint = FlameCoral,
+                    )
+                    Column {
+                        Text(
+                            text = "App Updates",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            text = "Installed: v${state.currentVersionName} (${state.currentVersionCode})",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                TextButton(
+                    onClick = { runCatching { uriHandler.openUri(releasesUrl) } },
+                    modifier = Modifier.testTag("github_releases_link"),
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Releases")
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "App Updates",
-                        style = MaterialTheme.typography.titleMedium,
+                        text = "Auto-check updates on launch",
+                        style = MaterialTheme.typography.titleSmall,
                     )
                     Text(
-                        text = "Installed: v${state.currentVersionName} (${state.currentVersionCode})",
+                        text = "Notify & install new GitHub Releases inside the app",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                Switch(
+                    checked = state.autoCheckUpdates,
+                    onCheckedChange = onSetAutoCheckUpdates,
+                    modifier = Modifier.testTag("auto_check_updates_switch"),
+                )
+            }
+
+            when (val dl = state.updateDownloadState) {
+                is com.example.ui.viewmodel.UpdateDownloadState.Downloading -> {
+                    val fraction = if (dl.totalBytes > 0L) {
+                        (dl.bytesDownloaded.toFloat() / dl.totalBytes.toFloat()).coerceIn(0f, 1f)
+                    } else {
+                        null
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = if (fraction != null) {
+                                "Downloading ${dl.tagName}: ${(fraction * 100).toInt()}%"
+                            } else {
+                                "Downloading ${dl.tagName} (${formatFileSize(dl.bytesDownloaded)})…"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = KeepEmerald,
+                        )
+                        if (fraction != null) {
+                            LinearProgressIndicator(
+                                progress = { fraction },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(CircleShape),
+                                color = KeepEmerald,
+                            )
+                        } else {
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(CircleShape),
+                                color = KeepEmerald,
+                            )
+                        }
+                    }
+                }
+                is com.example.ui.viewmodel.UpdateDownloadState.ReadyToInstall -> {
+                    Text(
+                        text = "Update ${dl.tagName} downloaded and ready to install.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = KeepEmerald,
+                    )
+                }
+                is com.example.ui.viewmodel.UpdateDownloadState.NeedsInstallPermission -> {
+                    Text(
+                        text = "Tap Update above to allow app installs and finish installing ${dl.tagName}.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = UndoAmber,
+                    )
+                }
+                is com.example.ui.viewmodel.UpdateDownloadState.Failed -> {
+                    Text(
+                        text = dl.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TrashCrimson,
+                    )
+                }
+                com.example.ui.viewmodel.UpdateDownloadState.Idle -> Unit
             }
 
             when (val status = state.updateStatus) {

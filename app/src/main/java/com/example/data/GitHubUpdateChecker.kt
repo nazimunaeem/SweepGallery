@@ -12,6 +12,8 @@ data class GitHubReleaseInfo(
     val notes: String,
     val htmlUrl: String,
     val apkDownloadUrl: String?,
+    val apkFileName: String? = null,
+    val apkSizeBytes: Long = 0L,
 )
 
 sealed interface UpdateCheckResult {
@@ -91,6 +93,8 @@ object GitHubUpdateChecker {
             val releaseNotes = json.optString("body", "").trim()
 
             var apkUrl: String? = null
+            var apkName: String? = null
+            var apkSize = 0L
             val assets = json.optJSONArray("assets")
             if (assets != null) {
                 for (i in 0 until assets.length()) {
@@ -98,6 +102,8 @@ object GitHubUpdateChecker {
                     val assetName = asset.optString("name", "")
                     if (assetName.endsWith(".apk", ignoreCase = true)) {
                         apkUrl = asset.optString("browser_download_url", "").takeIf { it.isNotBlank() }
+                        apkName = assetName
+                        apkSize = asset.optLong("size", 0L).coerceAtLeast(0L)
                         break
                     }
                 }
@@ -111,6 +117,8 @@ object GitHubUpdateChecker {
                         notes = releaseNotes,
                         htmlUrl = htmlUrl,
                         apkDownloadUrl = apkUrl,
+                        apkFileName = apkName,
+                        apkSizeBytes = apkSize,
                     ),
                 )
             } else {

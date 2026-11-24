@@ -1,8 +1,11 @@
 package com.example.ui.screens
 
+import android.os.Build
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,8 +26,13 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Undo
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.RestoreFromTrash
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -32,11 +40,16 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,8 +82,35 @@ fun TrashBinScreen(
     onDeleteAllConfirmed: () -> Unit,
     onGoToSwipe: () -> Unit,
     modifier: Modifier = Modifier,
+    onRestoreSelected: (Set<Long>) -> Unit = {},
+    onDeleteSelected: (List<PhotoItem>) -> Unit = {},
 ) {
     val swipeHaptics = rememberSwipeHaptics()
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+
+    LaunchedEffect(state.trashQueue) {
+        if (state.trashQueue.isEmpty()) {
+            selectionMode = false
+            selectedIds = emptySet()
+        } else if (selectedIds.isNotEmpty()) {
+            val validIds = state.trashQueue.mapTo(HashSet()) { it.id }
+            selectedIds = selectedIds.filterTo(HashSet()) { it in validIds }
+        }
+    }
+
+    val useSystemTrashUi = state.useSystemTrash && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+    val deleteVerb = if (useSystemTrashUi) {
+        stringResource(R.string.move_to_system_trash)
+    } else {
+        stringResource(R.string.delete_permanently)
+    }
+
+    val selectedPhotos = remember(state.trashQueue, selectedIds) {
+        state.trashQueue.filter { it.id in selectedIds }
+    }
+    val selectedBytes = remember(selectedPhotos) { selectedPhotos.sumOf { it.sizeBytes } }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -86,16 +126,16 @@ fun TrashBinScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Trash Queue",
                     style = MaterialTheme.typography.headlineMedium,
                 )
                 Text(
-                    text = if (state.trashQueue.isEmpty()) {
-                        "No photos waiting for deletion"
-                    } else {
-                        "${state.trashQueue.size} photos • ${formatFileSize(state.trashTotalBytes)} to free"
+                    text = when {
+                        state.trashQueue.isEmpty() -> "No media waiting for deletion"
+                        selectionMode -> "${selectedPhotos.size} selected • ${formatFileSize(selectedBytes)}"
+                        else -> "${state.trashQueue.size} items • ${formatFileSize(state.trashTotalBytes)} to free"
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -103,17 +143,58 @@ fun TrashBinScreen(
             }
 
             if (state.trashQueue.isNotEmpty()) {
-                TextButton(
-                    onClick = onRestoreAll,
-                    modifier = Modifier.testTag("restore_all_button"),
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.RestoreFromTrash,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.restore_all))
+                    TextButton(
+                        onClick = {
+                            if (selectionMode) {
+                                selectionMode = false
+                                selectedIds = emptySet()
+                            } else {
+                                selectionMode = true
+                            }
+                        },
+                        modifier = Modifier.testTag("trash_select_toggle"),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Checklist,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (selectionMode) "Done" else "Select")
+                    }
+
+                    if (!selectionMode) {
+                        TextButton(
+                            onClick = onRestoreAll,
+                            modifier = Modifier.testTag("restore_all_button"),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.RestoreFromTrash,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(stringResource(R.string.restore_all))
+                        }
+                    } else {
+                        val allSelected = selectedIds.size == state.trashQueue.size
+                        TextButton(
+                            onClick = {
+                                selectedIds = if (allSelected) {
+                                    emptySet()
+                                } else {
+                                    state.trashQueue.mapTo(HashSet()) { it.id }
+                                }
+                            },
+                            modifier = Modifier.testTag("trash_select_all_button"),
+                        ) {
+                            Text(if (allSelected) "None" else "All")
+                        }
+                    }
                 }
             }
         }
@@ -188,15 +269,32 @@ fun TrashBinScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(state.trashQueue, key = { it.id }) { photo ->
+                    val isSelected = photo.id in selectedIds
                     TrashGridTile(
                         photo = photo,
-                        onTap = { onInspectPhoto(photo) },
+                        selectionMode = selectionMode,
+                        isSelected = isSelected,
+                        onTap = {
+                            if (selectionMode) {
+                                selectedIds = if (isSelected) {
+                                    selectedIds - photo.id
+                                } else {
+                                    selectedIds + photo.id
+                                }
+                            } else {
+                                onInspectPhoto(photo)
+                            }
+                        },
+                        onLongPress = {
+                            selectionMode = true
+                            selectedIds = selectedIds + photo.id
+                        },
                         onRestore = { onRestorePhoto(photo) },
                     )
                 }
             }
 
-            // Bottom Batch Delete Bar
+            // Bottom Batch Action Bar
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -207,47 +305,127 @@ fun TrashBinScreen(
                 border = BorderStroke(1.dp, TrashCrimson.copy(alpha = 0.35f)),
                 shadowElevation = 8.dp,
             ) {
-                Button(
-                    onClick = {
-                        swipeHaptics.onDeleteCommitted()
-                        onDeleteAllConfirmed()
-                    },
-                    enabled = !state.isDeleting,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp)
-                        .height(54.dp)
-                        .testTag("confirm_batch_delete_button"),
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = TrashCrimson,
-                        contentColor = Color.White,
-                    ),
-                ) {
-                    if (state.isDeleting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = Color.White,
-                        )
-                    } else {
-                        Icon(Icons.Rounded.DeleteForever, contentDescription = null)
+                if (selectionMode) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                onRestoreSelected(selectedIds)
+                                selectionMode = false
+                                selectedIds = emptySet()
+                            },
+                            enabled = selectedPhotos.isNotEmpty() && !state.isDeleting,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp)
+                                .testTag("restore_selected_button"),
+                            shape = CircleShape,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.RestoreFromTrash,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Restore (${selectedPhotos.size})")
+                        }
+
+                        Button(
+                            onClick = {
+                                swipeHaptics.onDeleteCommitted()
+                                onDeleteSelected(selectedPhotos)
+                                selectionMode = false
+                                selectedIds = emptySet()
+                            },
+                            enabled = selectedPhotos.isNotEmpty() && !state.isDeleting,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp)
+                                .testTag("delete_selected_button"),
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = TrashCrimson,
+                                contentColor = Color.White,
+                            ),
+                        ) {
+                            Icon(
+                                imageVector = if (useSystemTrashUi) {
+                                    Icons.Rounded.DeleteOutline
+                                } else {
+                                    Icons.Rounded.DeleteForever
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (useSystemTrashUi) {
+                                    "Trash (${selectedPhotos.size})"
+                                } else {
+                                    "Delete (${selectedPhotos.size})"
+                                },
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "${stringResource(R.string.delete_permanently)} (${formatFileSize(state.trashTotalBytes)})",
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                    )
+                } else {
+                    Button(
+                        onClick = {
+                            swipeHaptics.onDeleteCommitted()
+                            onDeleteAllConfirmed()
+                        },
+                        enabled = !state.isDeleting,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp)
+                            .height(54.dp)
+                            .testTag("confirm_batch_delete_button"),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = TrashCrimson,
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        if (state.isDeleting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White,
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (useSystemTrashUi) {
+                                    Icons.Rounded.DeleteOutline
+                                } else {
+                                    Icons.Rounded.DeleteForever
+                                },
+                                contentDescription = null,
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "$deleteVerb (${formatFileSize(state.trashTotalBytes)})",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TrashGridTile(
     photo: PhotoItem,
+    selectionMode: Boolean,
+    isSelected: Boolean,
     onTap: () -> Unit,
+    onLongPress: () -> Unit,
     onRestore: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -265,7 +443,17 @@ private fun TrashGridTile(
             .aspectRatio(0.85f)
             .clip(MaterialTheme.shapes.small)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .clickable(onClick = onTap)
+            .then(
+                if (isSelected) {
+                    Modifier.border(2.5.dp, TrashCrimson, MaterialTheme.shapes.small)
+                } else {
+                    Modifier
+                },
+            )
+            .combinedClickable(
+                onClick = onTap,
+                onLongClick = onLongPress,
+            )
             .testTag("trash_tile_${photo.id}"),
     ) {
         AsyncImage(
@@ -296,22 +484,61 @@ private fun TrashGridTile(
                 .padding(8.dp),
         )
 
-        IconButton(
-            onClick = onRestore,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(4.dp)
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.6f))
-                .testTag("restore_tile_${photo.id}"),
-        ) {
+        if (photo.isVideo) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(6.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.65f))
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = "Video",
+                    tint = Color.White,
+                    modifier = Modifier.size(11.dp),
+                )
+                Text(
+                    text = photo.formattedDuration,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                )
+            }
+        }
+
+        if (selectionMode) {
             Icon(
-                imageVector = Icons.AutoMirrored.Rounded.Undo,
-                contentDescription = stringResource(R.string.cd_restore_photo),
-                tint = KeepEmerald,
-                modifier = Modifier.size(18.dp),
+                imageVector = if (isSelected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                contentDescription = if (isSelected) "Selected" else "Not selected",
+                tint = if (isSelected) TrashCrimson else Color.White,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.55f)),
             )
+        } else {
+            IconButton(
+                onClick = onRestore,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .testTag("restore_tile_${photo.id}"),
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.Undo,
+                    contentDescription = stringResource(R.string.cd_restore_photo),
+                    tint = KeepEmerald,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
     }
 }

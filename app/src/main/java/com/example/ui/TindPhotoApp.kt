@@ -84,9 +84,16 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import coil.Coil
+import coil.ImageLoader
 import com.example.R
 import com.example.data.GitHubReleaseInfo
+import com.example.data.InAppUpdater
+import com.example.data.VideoThumbnailFetcher
 import com.example.model.SwipeDirection
+import com.example.model.formatFileSize
+import com.example.ui.components.BurstCompareSheet
+import com.example.ui.components.DeckJumpSheet
 import com.example.ui.components.PermissionGateCard
 import com.example.ui.components.PhotoInfoBottomSheet
 import com.example.ui.components.PhotoLightboxOverlay
@@ -96,8 +103,12 @@ import com.example.ui.screens.TrashBinScreen
 import com.example.ui.theme.FlameCoral
 import com.example.ui.theme.KeepEmerald
 import com.example.ui.theme.TindPhotoTheme
+import com.example.ui.theme.TrashCrimson
+import com.example.ui.theme.UndoAmber
 import com.example.ui.viewmodel.TindPhotoViewModel
+import com.example.ui.viewmodel.UpdateDownloadState
 import com.example.ui.viewmodel.UpdateUiState
+import java.io.File
 
 const val ROUTE_SWIPE = "swipe"
 const val ROUTE_TRASH = "trash"
@@ -135,19 +146,51 @@ private val TopDestinations = listOf(
     ),
 )
 
-private fun galleryPermissionName(): String {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        Manifest.permission.READ_MEDIA_IMAGES
-    } else {
-        Manifest.permission.READ_EXTERNAL_STORAGE
+private fun galleryPermissions(): Array<String> {
+    return when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO,
+            Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+        )
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO,
+        )
+        else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
 }
 
-private fun hasGalleryPermission(context: Context): Boolean {
-    return ContextCompat.checkSelfPermission(
-        context,
-        galleryPermissionName(),
-    ) == PackageManager.PERMISSION_GRANTED
+private data class GalleryAccessStatus(
+    val hasAccess: Boolean,
+    val isLimited: Boolean,
+)
+
+private fun evaluateGalleryAccess(context: Context): GalleryAccessStatus {
+    fun isGranted(permission: String): Boolean {
+        return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    }
+
+    return when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> {
+            val hasFullVisual = isGranted(Manifest.permission.READ_MEDIA_IMAGES) ||
+                isGranted(Manifest.permission.READ_MEDIA_VIDEO)
+            val hasSelected = isGranted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+            GalleryAccessStatus(
+                hasAccess = hasFullVisual || hasSelected,
+                isLimited = hasSelected && !hasFullVisual,
+            )
+        }
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+            val hasMedia = isGranted(Manifest.permission.READ_MEDIA_IMAGES) ||
+                isGranted(Manifest.permission.READ_MEDIA_VIDEO)
+            GalleryAccessStatus(hasAccess = hasMedia, isLimited = false)
+        }
+        else -> {
+            val hasStorage = isGranted(Manifest.permission.READ_EXTERNAL_STORAGE)
+            GalleryAccessStatus(hasAccess = hasStorage, isLimited = false)
+        }
+    }
 }
 
 @Composable
@@ -156,14 +199,29 @@ fun TindPhotoApp(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val appContext = context.applicationContext
     val snackbarHostState = remember { SnackbarHostState() }
     var permissionDeniedOnce by remember { mutableStateOf(false) }
 
+    remember(appContext) {
+        val loader = ImageLoader.Builder(appContext)
+            .components {
+                add(VideoThumbnailFetcher.Factory(appContext))
+            }
+            .build()
+        Coil.setImageLoader(loader)
+        loader
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (!granted) permissionDeniedOnce = true
-        viewModel.onPermissionUpdated(granted)
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        val access = evaluateGalleryAccess(context)
+        if (!access.hasAccess) permissionDeniedOnce = true
+        viewModel.onPermissionUpdated(
+            granted = access.hasAccess,
+            isLimitedAccess = access.isLimited,
+        )
     }
 
     val deleteSenderLauncher = rememberLauncherForActivityResult(
@@ -172,13 +230,39 @@ fun TindPhotoApp(
         viewModel.onDeleteConfirmationResult(result.resultCode == Activity.RESULT_OK)
     }
 
+    val unknownSourcesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) {
+        viewModel.onInstallPermissionReturned()
+    }
+
     LaunchedEffect(Unit) {
-        val granted = hasGalleryPermission(context)
-        viewModel.onPermissionUpdated(granted)
+        val access = evaluateGalleryAccess(context)
+        viewModel.onPermissionUpdated(
+            granted = access.hasAccess,
+            isLimitedAccess = access.isLimited,
+        )
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        viewModel.onPermissionUpdated(hasGalleryPermission(context))
+        val access = evaluateGalleryAccess(context)
+        viewModel.onPermissionUpdated(
+            granted = access.hasAccess,
+            isLimitedAccess = access.isLimited,
+        )
+        viewModel.onInstallPermissionReturned()
+    }
+
+    LaunchedEffect(state.pendingApkInstallPath) {
+        val path = state.pendingApkInstallPath
+        if (path != null) {
+            viewModel.consumePendingApkInstall()
+            val apkFile = File(path)
+            if (apkFile.exists()) {
+                val installIntent = InAppUpdater.buildInstallApkIntent(context, apkFile)
+                runCatching { context.startActivity(installIntent) }
+            }
+        }
     }
 
     LaunchedEffect(state.pendingDeleteSender) {
@@ -233,7 +317,7 @@ fun TindPhotoApp(
                         PermissionGateCard(
                             showSettingsAction = permissionDeniedOnce,
                             onRequestPermission = {
-                                permissionLauncher.launch(galleryPermissionName())
+                                permissionLauncher.launch(galleryPermissions())
                             },
                             onOpenSettings = {
                                 val intent = Intent(
@@ -342,6 +426,12 @@ fun TindPhotoApp(
                                             onSeedSamples = viewModel::seedSamplePhotos,
                                             onIncludeReviewed = { viewModel.setIncludeReviewed(true) },
                                             onOpenTrashTab = { navigateToTab(ROUTE_TRASH) },
+                                            onRequestMoreMedia = {
+                                                permissionLauncher.launch(galleryPermissions())
+                                            },
+                                            onSelectSmartCategory = viewModel::selectSmartCategory,
+                                            onOpenBurstCompare = viewModel::openBurstCompare,
+                                            onOpenJumpSheet = { viewModel.setShowJumpSheet(true) },
                                         )
                                     }
 
@@ -351,8 +441,10 @@ fun TindPhotoApp(
                                             onRestorePhoto = viewModel::restoreFromTrash,
                                             onRestoreAll = viewModel::restoreAllFromTrash,
                                             onInspectPhoto = viewModel::openLightbox,
-                                            onDeleteAllConfirmed = viewModel::requestBatchDelete,
+                                            onDeleteAllConfirmed = { viewModel.requestBatchDelete() },
                                             onGoToSwipe = { navigateToTab(ROUTE_SWIPE) },
+                                            onRestoreSelected = { ids -> viewModel.restoreBatchFromTrash(ids) },
+                                            onDeleteSelected = { targets -> viewModel.requestBatchDelete(targets) },
                                         )
                                     }
 
@@ -374,6 +466,12 @@ fun TindPhotoApp(
                                             onSeedSamples = viewModel::seedSamplePhotos,
                                             onCheckForUpdates = viewModel::checkForUpdates,
                                             onOpenUpdateDialog = { viewModel.setShowUpdateDialog(true) },
+                                            onSelectSmartCategoryAndSwipe = { category ->
+                                                viewModel.selectSmartCategory(category)
+                                                navigateToTab(ROUTE_SWIPE)
+                                            },
+                                            onSetUseSystemTrash = viewModel::setUseSystemTrash,
+                                            onSetAutoCheckUpdates = viewModel::setAutoCheckUpdates,
                                         )
                                     }
                                 }
@@ -383,7 +481,7 @@ fun TindPhotoApp(
                 }
             }
 
-            // Fullscreen Pinch-to-Zoom Lightbox
+            // Fullscreen Pinch-to-Zoom & Video Lightbox
             PhotoLightboxOverlay(
                 photo = state.lightboxPhoto,
                 onClose = { viewModel.openLightbox(null) },
@@ -400,14 +498,46 @@ fun TindPhotoApp(
                 onTrash = { photo -> viewModel.swipePhoto(photo, SwipeDirection.LEFT_TRASH) },
             )
 
+            // Burst / Similar Shots Comparison Sheet
+            BurstCompareSheet(
+                burstGroup = state.comparingBurstGroup,
+                onDismiss = { viewModel.openBurstCompare(null) },
+                onKeepBestAndTrashRest = viewModel::keepOnlyPhotoInBurst,
+                onOpenLightbox = viewModel::openLightbox,
+            )
+
+            // Deck Quick-Jump Sheet
+            DeckJumpSheet(
+                visible = state.showJumpSheet,
+                deckPhotos = state.deckPhotos,
+                favoriteIds = state.favoritePhotoIds,
+                onDismiss = { viewModel.setShowJumpSheet(false) },
+                onSelectPhoto = { photo -> viewModel.jumpToPhotoInDeck(photo.id) },
+            )
+
             // GitHub Release Update Popup Modal
             val updateStatus = state.updateStatus
             if (state.showUpdateDialog && updateStatus is UpdateUiState.Available) {
                 UpdateAvailableDialog(
                     currentVersionName = state.currentVersionName,
                     release = updateStatus.release,
+                    downloadState = state.updateDownloadState,
                     onDownload = {
-                        viewModel.setShowUpdateDialog(false)
+                        if (updateStatus.release.apkDownloadUrl != null) {
+                            viewModel.startInAppUpdate(updateStatus.release)
+                        } else {
+                            viewModel.setShowUpdateDialog(false)
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateStatus.release.htmlUrl))
+                            runCatching { context.startActivity(intent) }
+                        }
+                    },
+                    onInstallApk = viewModel::installDownloadedUpdate,
+                    onGrantInstallPermission = {
+                        val intent = InAppUpdater.buildManageUnknownSourcesIntent(context)
+                        runCatching { unknownSourcesLauncher.launch(intent) }
+                    },
+                    onCancelDownload = viewModel::cancelInAppUpdate,
+                    onOpenBrowser = {
                         val targetUrl = updateStatus.release.apkDownloadUrl ?: updateStatus.release.htmlUrl
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
                         runCatching { context.startActivity(intent) }
@@ -425,9 +555,15 @@ fun UpdateAvailableDialog(
     release: GitHubReleaseInfo,
     onDownload: () -> Unit,
     onDismiss: () -> Unit,
+    downloadState: UpdateDownloadState = UpdateDownloadState.Idle,
+    onInstallApk: () -> Unit = {},
+    onGrantInstallPermission: () -> Unit = {},
+    onCancelDownload: () -> Unit = {},
+    onOpenBrowser: () -> Unit = {},
 ) {
+    val isDownloading = downloadState is UpdateDownloadState.Downloading
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isDownloading) onDismiss() },
         modifier = Modifier.testTag("update_available_dialog"),
         icon = {
             Icon(
@@ -448,17 +584,35 @@ fun UpdateAvailableDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Surface(
-                    shape = CircleShape,
-                    color = KeepEmerald.copy(alpha = 0.14f),
-                    border = BorderStroke(1.dp, KeepEmerald.copy(alpha = 0.4f)),
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        text = "v$currentVersionName → ${release.tagName}",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = KeepEmerald,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
+                    Surface(
+                        shape = CircleShape,
+                        color = KeepEmerald.copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, KeepEmerald.copy(alpha = 0.4f)),
+                    ) {
+                        Text(
+                            text = "v$currentVersionName → ${release.tagName}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = KeepEmerald,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
+                    }
+                    if (release.apkSizeBytes > 0L) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {
+                            Text(
+                                text = formatFileSize(release.apkSizeBytes),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
                 }
                 if (release.title.isNotBlank() && release.title != release.tagName) {
                     Text(
@@ -474,33 +628,154 @@ fun UpdateAvailableDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                when (downloadState) {
+                    is UpdateDownloadState.Downloading -> {
+                        val hasTotal = downloadState.totalBytes > 0L
+                        val fraction = if (hasTotal) {
+                            (downloadState.bytesDownloaded.toFloat() / downloadState.totalBytes.toFloat()).coerceIn(0f, 1f)
+                        } else {
+                            null
+                        }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("update_download_progress"),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                text = if (fraction != null) {
+                                    "Downloading ${formatFileSize(downloadState.bytesDownloaded)} / ${formatFileSize(downloadState.totalBytes)} (${(fraction * 100).toInt()}%)"
+                                } else {
+                                    "Downloading ${formatFileSize(downloadState.bytesDownloaded)}…"
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = KeepEmerald,
+                            )
+                            if (fraction != null) {
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    progress = { fraction },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = KeepEmerald,
+                                )
+                            } else {
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = KeepEmerald,
+                                )
+                            }
+                        }
+                    }
+                    is UpdateDownloadState.NeedsInstallPermission -> {
+                        Text(
+                            text = "Allow SweepGallery to install unknown apps in system settings, then Android will launch the update installer.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = UndoAmber,
+                        )
+                    }
+                    is UpdateDownloadState.ReadyToInstall -> {
+                        Text(
+                            text = "APK verified and ready to install.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = KeepEmerald,
+                        )
+                    }
+                    is UpdateDownloadState.Failed -> {
+                        Text(
+                            text = downloadState.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TrashCrimson,
+                        )
+                    }
+                    UpdateDownloadState.Idle -> Unit
+                }
             }
         },
         confirmButton = {
-            Button(
-                onClick = onDownload,
-                shape = CircleShape,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = KeepEmerald,
-                    contentColor = Color(0xFF042619),
-                ),
-                modifier = Modifier.testTag("open_github_release_button"),
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Rounded.OpenInNew,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(if (release.apkDownloadUrl != null) "Download APK" else "Download on GitHub")
+            when (downloadState) {
+                is UpdateDownloadState.Downloading -> {
+                    TextButton(
+                        onClick = onCancelDownload,
+                        modifier = Modifier.testTag("cancel_update_download_button"),
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+                is UpdateDownloadState.NeedsInstallPermission -> {
+                    Button(
+                        onClick = onGrantInstallPermission,
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = UndoAmber,
+                            contentColor = Color(0xFF281800),
+                        ),
+                        modifier = Modifier.testTag("allow_install_unknown_apps_button"),
+                    ) {
+                        Text("Allow & Install")
+                    }
+                }
+                is UpdateDownloadState.ReadyToInstall -> {
+                    Button(
+                        onClick = onInstallApk,
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = KeepEmerald,
+                            contentColor = Color(0xFF042619),
+                        ),
+                        modifier = Modifier.testTag("install_downloaded_apk_button"),
+                    ) {
+                        Text("Install Update")
+                    }
+                }
+                is UpdateDownloadState.Failed, UpdateDownloadState.Idle -> {
+                    Button(
+                        onClick = onDownload,
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = KeepEmerald,
+                            contentColor = Color(0xFF042619),
+                        ),
+                        modifier = Modifier.testTag("open_github_release_button"),
+                    ) {
+                        Icon(
+                            imageVector = if (release.apkDownloadUrl != null) {
+                                Icons.Rounded.SystemUpdate
+                            } else {
+                                Icons.AutoMirrored.Rounded.OpenInNew
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = when {
+                                downloadState is UpdateDownloadState.Failed -> "Retry Download"
+                                release.apkDownloadUrl != null -> "Download & Install"
+                                else -> "Open GitHub"
+                            },
+                        )
+                    }
+                }
             }
         },
         dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier.testTag("update_dialog_later_button"),
-            ) {
-                Text("Later")
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (!isDownloading && release.apkDownloadUrl != null) {
+                    TextButton(
+                        onClick = onOpenBrowser,
+                        modifier = Modifier.testTag("update_open_browser_button"),
+                    ) {
+                        Text("Browser")
+                    }
+                }
+                if (!isDownloading) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("update_dialog_later_button"),
+                    ) {
+                        Text("Later")
+                    }
+                }
             }
         },
     )

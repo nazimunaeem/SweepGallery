@@ -5,7 +5,9 @@ import android.content.Intent
 import android.media.ExifInterface
 import android.os.Build
 import android.provider.DocumentsContract
+import android.widget.MediaController
 import android.widget.Toast
+import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -49,6 +51,7 @@ import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.PhotoSizeSelectActual
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.ShutterSpeed
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.ZoomIn
@@ -94,6 +97,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.R
@@ -412,42 +416,67 @@ fun PhotoLightboxOverlay(
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.96f)),
             ) {
-                AsyncImage(
-                    model = lightboxRequest,
-                    contentDescription = photo.displayName,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(photo.id) {
-                            detectTapGestures(
-                                onDoubleTap = {
-                                    if (scale > 1.2f) {
-                                        scale = 1f
-                                        offset = Offset.Zero
-                                    } else {
-                                        scale = 2.5f
+                if (photo.isVideo) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(vertical = 84.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        AndroidView(
+                            factory = { ctx ->
+                                VideoView(ctx).apply {
+                                    val controller = MediaController(ctx)
+                                    controller.setAnchorView(this)
+                                    setMediaController(controller)
+                                    setVideoURI(photo.uri)
+                                    setOnPreparedListener { mp ->
+                                        mp.isLooping = true
+                                        start()
                                     }
-                                },
-                            )
-                        }
-                        .pointerInput(photo.id) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                val nextScale = (scale * zoom).coerceIn(1f, 4f)
-                                scale = nextScale
-                                offset = if (nextScale > 1f) {
-                                    offset + pan
-                                } else {
-                                    Offset.Zero
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                } else {
+                    AsyncImage(
+                        model = lightboxRequest,
+                        contentDescription = photo.displayName,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(photo.id) {
+                                detectTapGestures(
+                                    onDoubleTap = {
+                                        if (scale > 1.2f) {
+                                            scale = 1f
+                                            offset = Offset.Zero
+                                        } else {
+                                            scale = 2.5f
+                                        }
+                                    },
+                                )
+                            }
+                            .pointerInput(photo.id) {
+                                detectTransformGestures { _, pan, zoom, _ ->
+                                    val nextScale = (scale * zoom).coerceIn(1f, 4f)
+                                    scale = nextScale
+                                    offset = if (nextScale > 1f) {
+                                        offset + pan
+                                    } else {
+                                        Offset.Zero
+                                    }
                                 }
                             }
-                        }
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                            translationX = offset.x
-                            translationY = offset.y
-                        },
-                )
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                translationX = offset.x
+                                translationY = offset.y
+                            },
+                    )
+                }
 
                 // Top Bar
                 Row(
@@ -466,13 +495,33 @@ fun PhotoLightboxOverlay(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        val durationExtra = if (photo.isVideo && photo.durationMillis > 0L) {
+                            " • ${photo.formattedDuration}"
+                        } else {
+                            ""
+                        }
                         Text(
-                            text = "${photo.resolutionLabel} • ${photo.formattedSize}",
+                            text = "${photo.resolutionLabel} • ${photo.formattedSize}$durationExtra",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.White.copy(alpha = 0.72f),
                         )
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = { shareMediaItem(context, photo) },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.14f))
+                            .testTag("lightbox_share_button"),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Share,
+                            contentDescription = stringResource(R.string.share_photo),
+                            tint = Color.White,
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
                     IconButton(
                         onClick = onClose,
                         modifier = Modifier
@@ -727,7 +776,23 @@ fun PhotoInfoBottomSheet(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(8.dp))
+                IconButton(
+                    onClick = { shareMediaItem(context, photo) },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .testTag("inspector_share_button"),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Share,
+                        contentDescription = stringResource(R.string.share_photo),
+                        tint = accentColor,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
                 FilledTonalButton(
                     onClick = {
                         onDismiss()
@@ -737,7 +802,7 @@ fun PhotoInfoBottomSheet(
                 ) {
                     Icon(Icons.Rounded.ZoomIn, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Zoom")
+                    Text(if (photo.isVideo) "Play" else "Zoom")
                 }
             }
 
