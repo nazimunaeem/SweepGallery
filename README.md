@@ -89,10 +89,10 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## Automated Releases (CI/CD)
 
-`.github/workflows/release-apk.yml` runs unit & Robolectric tests on pushes to `main`/`master`, `v*` tags, or manual workflow dispatch, and publishes signed release APKs (`SweepGallery-<tag>.apk`) when signing secrets are configured (debug APKs are never published to Releases):
+`.github/workflows/release-apk.yml` runs unit & Robolectric tests on pushes to `main`/`master`, `v*` tags, or manual workflow dispatch, and publishes an APK to **GitHub Releases**:
 
 - Runs `gradle :app:testDebugUnitTest` on every push.
-- When `RELEASE_KEYSTORE_BASE64`, `STORE_PASSWORD`, and `KEY_PASSWORD` secrets are set, builds `app-release.apk`, uploads `SweepGallery-Release-APK`, and publishes `SweepGallery-<tag>.apk` to **GitHub Releases**.
+- When `RELEASE_KEYSTORE_BASE64`, `STORE_PASSWORD`, and `KEY_PASSWORD` secrets are set, builds and publishes `SweepGallery-<tag>.apk` (signed release); otherwise builds and publishes `SweepGallery-<tag>-debug.apk` signed with the repository debug keystore.
 
 ---
 

@@ -41,6 +41,12 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
+      - name: Restore Debug Keystore
+        run: |
+          if [ ! -f debug.keystore ] && [ -f debug.keystore.base64 ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+
       - name: Run Unit Tests
         run: gradle :app:testDebugUnitTest --no-daemon -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8"
 
@@ -60,17 +66,19 @@ jobs:
           echo "version_name=$VER_NAME" >> "$GITHUB_OUTPUT"
           echo "version_code=$VER_CODE" >> "$GITHUB_OUTPUT"
 
-      - name: Build Signed Release APK
+      - name: Build APK (Signed Release or Debug)
         id: build_apk
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
+          VER_NAME="${{ steps.release_tag.outputs.version_name }}"
+          VER_CODE="${{ steps.release_tag.outputs.version_code }}"
+          TAG_NAME="${{ steps.release_tag.outputs.tag }}"
+
           if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
             echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > my-upload-key.jks
-            VER_NAME="${{ steps.release_tag.outputs.version_name }}"
-            VER_CODE="${{ steps.release_tag.outputs.version_code }}"
             gradle assembleRelease --no-daemon --stacktrace \
               -PversionName="$VER_NAME" -PversionCode="$VER_CODE" \
               -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8"
@@ -79,25 +87,32 @@ jobs:
               echo "Expected release APK not found at $APK_PATH"
               exit 1
             fi
-            TAG_NAME="${{ steps.release_tag.outputs.tag }}"
-            RELEASE_APK="app/build/outputs/apk/release/SweepGallery-${TAG_NAME}.apk"
-            cp "$APK_PATH" "$RELEASE_APK"
-            echo "apk_path=$RELEASE_APK" >> "$GITHUB_OUTPUT"
-            echo "release_ready=true" >> "$GITHUB_OUTPUT"
+            OUT_APK="app/build/outputs/apk/release/SweepGallery-${TAG_NAME}.apk"
+            cp "$APK_PATH" "$OUT_APK"
+            echo "artifact_name=SweepGallery-Release-APK" >> "$GITHUB_OUTPUT"
           else
-            echo "release_ready=false" >> "$GITHUB_OUTPUT"
-            echo "Debug APK releases are disabled. Configure RELEASE_KEYSTORE_BASE64, STORE_PASSWORD, and KEY_PASSWORD secrets to publish app-release.apk." >> "$GITHUB_STEP_SUMMARY"
+            gradle assembleDebug --no-daemon --stacktrace \
+              -PversionName="$VER_NAME" -PversionCode="$VER_CODE" \
+              -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8"
+            APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+            if [ ! -f "$APK_PATH" ]; then
+              echo "Expected debug APK not found at $APK_PATH"
+              exit 1
+            fi
+            OUT_APK="app/build/outputs/apk/debug/SweepGallery-${TAG_NAME}-debug.apk"
+            cp "$APK_PATH" "$OUT_APK"
+            echo "artifact_name=SweepGallery-Debug-APK" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Upload Release APK workflow artifact
-        if: steps.build_apk.outputs.release_ready == 'true'
+          echo "apk_path=$OUT_APK" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SweepGallery-Release-APK
+          name: ${{ steps.build_apk.outputs.artifact_name }}
           path: ${{ steps.build_apk.outputs.apk_path }}
 
       - name: Publish GitHub Release
-        if: steps.build_apk.outputs.release_ready == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_tag.outputs.tag }}
