@@ -52,8 +52,8 @@ jobs:
             TAG="${{ github.ref_name }}"
             VER_NAME="${TAG#v}"
           else
-            TAG="v1.1.${RUN_NUM}"
-            VER_NAME="1.1.${RUN_NUM}"
+            TAG="v1.2.${RUN_NUM}"
+            VER_NAME="1.2.${RUN_NUM}"
           fi
           VER_CODE=$((100 + RUN_NUM))
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"

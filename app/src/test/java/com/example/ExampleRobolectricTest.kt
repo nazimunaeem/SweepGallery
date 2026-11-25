@@ -13,6 +13,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.core.content.ContextCompat
 import androidx.test.core.app.ApplicationProvider
@@ -422,7 +423,7 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `burst compare sheet and deck jump sheet invoke selection callbacks`() {
+  fun `burst compare sheet invokes keep best callback`() {
     val p1 = PhotoItem(
       id = 201L,
       uri = Uri.parse("content://media/external/images/media/201"),
@@ -447,7 +448,6 @@ class ExampleRobolectricTest {
     )
     val group = BurstGroup("burst_201", listOf(p1, p2), 4_000_000L)
     var keptId = -1L
-    var jumpedId = -1L
 
     composeTestRule.activityRule.scenario.onActivity { activity ->
       activity.setContent {
@@ -458,6 +458,46 @@ class ExampleRobolectricTest {
             onKeepBestAndTrashRest = { _, keep -> keptId = keep.id },
             onOpenLightbox = {},
           )
+        }
+      }
+    }
+
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("burst_keep_selected_button")
+      .performScrollTo()
+      .performClick()
+    assertEquals(202L, keptId)
+  }
+
+  @Test
+  fun `deck jump sheet invokes selection callback`() {
+    val p1 = PhotoItem(
+      id = 201L,
+      uri = Uri.parse("content://media/external/images/media/201"),
+      displayName = "BURST_1.jpg",
+      sizeBytes = 1_500_000L,
+      dateTakenMillis = 1_763_711_700_000L,
+      dateAddedSeconds = 1_763_711_700L,
+      width = 3000,
+      height = 4000,
+      albumName = "Camera",
+    )
+    val p2 = PhotoItem(
+      id = 202L,
+      uri = Uri.parse("content://media/external/images/media/202"),
+      displayName = "BURST_2.jpg",
+      sizeBytes = 2_500_000L,
+      dateTakenMillis = 1_763_711_701_000L,
+      dateAddedSeconds = 1_763_711_701L,
+      width = 4000,
+      height = 4000,
+      albumName = "Camera",
+    )
+    var jumpedId = -1L
+
+    composeTestRule.activityRule.scenario.onActivity { activity ->
+      activity.setContent {
+        TindPhotoTheme {
           DeckJumpSheet(
             visible = true,
             deckPhotos = listOf(p1, p2),
@@ -472,8 +512,6 @@ class ExampleRobolectricTest {
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("jump_item_202").performClick()
     assertEquals(202L, jumpedId)
-    composeTestRule.onNodeWithTag("burst_keep_selected_button").performClick()
-    assertEquals(202L, keptId)
   }
 
   @Test
