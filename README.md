@@ -18,25 +18,29 @@
 
 ## Overview
 
-**SweepGallery** helps you declutter thousands of device photos with effortless swipe gestures—100% offline on your device. Swipe right to keep memories, swipe left to queue clutter for deletion, inspect full EXIF & directory metadata, and reclaim storage with a single system-confirmed batch delete.
+**SweepGallery** (`v1.2.0`) helps you declutter thousands of device photos and videos with effortless swipe gestures—100% offline on your device. Swipe right to keep memories, swipe left to queue clutter for deletion, swipe up to star favorites, compare burst shots side-by-side, inspect full EXIF & directory metadata, and reclaim storage with a single system-confirmed batch delete or 30-day System Trash.
 
 ---
 
 ## Features
 
-- **Smooth Swipe Deck**
-  - Responsive horizontal swipe & flick gestures with real-time fading **KEEP** (right) and **DELETE** (left) card overlays, directional border glows, and tactile delete haptic feedback.
-  - Zero-wait back-to-back swiping via non-blocking exit animations and Coil image pre-decoding alongside a clean **X / Undo / Heart** dock.
-  - **Month & Album Filtering**: Filter by month (with automatic green completion checkmarks) or device album, and sort by **Newest**, **Oldest**, or **Largest** file size.
-- **Fullscreen Zoom & Inspector `(i)`**
+- **Smooth Swipe Deck (Photos & Videos)**
+  - Responsive horizontal & upward swipe gestures with real-time fading **KEEP** (right), **DELETE** (left), and **STAR** (up) card overlays, directional border glows, and tactile haptic feedback.
+  - Inline **video sweeping** with playback toggle, duration badge, and thumbnail decoding alongside Coil image pre-decoding and a clean **X / Undo / Star / Heart** dock.
+  - **Smart Cleanup Categories**: Focus directly on **All**, **Bursts**, **Videos**, **Large (>10 MB)**, **Screenshots**, or **Starred** media.
+  - **Burst Detector & Compare Sheet**: Automatically detects rapid shot sequences and opens a side-by-side **Compare Burst** sheet highlighting the sharpest frame to keep while trashing the rest.
+  - **Quick-Jump Sheet, Month & Album Filtering**: Filter by month (with green completion checkmarks) or device album, sort by **Newest**, **Oldest**, or **Largest**, and tap the deck counter pill to jump directly to any item.
+- **Fullscreen Zoom, Sharing & Inspector `(i)`**
   - Tap any card for a pinch-to-zoom / double-tap fullscreen **Lightbox** with quick Keep/Delete controls.
-  - Open the `(i)` metadata sheet to view **Directory** with a one-tap **Show in Files** action, **File Details** (format, size, dimensions & megapixels, date/time), and **Camera & EXIF** data (device, focal length, aperture, shutter speed, ISO, coordinates).
-- **Trash Queue & Safe Batch Deletion**
-  - Left-swiped photos collect in a **Trash** grid where you can inspect sizes, restore individual photos, or **Restore All** before deleting anything.
-  - **Delete Permanently** uses Android's system-confirmed `MediaStore.createDeleteRequest` dialog (with pre-Android 11 fallback) and tracks freed storage.
-- **Studio & Stats**
-  - Persistent stats for total space reclaimed, kept vs. deleted counts, and keep ratio via DataStore Preferences.
-  - Space-saving **Month / Album** two-tab square grid browser, Darkroom / Light studio theme toggle, kept-history reset, sample photo seeder, and GitHub Releases update checker.
+  - Open the `(i)` metadata sheet to view **Directory** with a one-tap **Show in Files** action, **Share**, **File Details** (format, size, dimensions & megapixels, date/time), and **Camera & EXIF** data (device, focal length, aperture, shutter speed, ISO, coordinates).
+- **Persistent Trash Queue & Safe Batch Deletion**
+  - Left-swiped items persist across app restarts in a **Trash** grid supporting **Multi-Select** batch restore/delete, individual restore, or **Restore All**.
+  - Choose between permanent deletion (`MediaStore.createDeleteRequest`) or recoverable **Move to System Trash (30 days)** (`MediaStore.createTrashRequest` on Android 11+).
+  - Supports **Android 14+ Partial Photo Access** (`READ_MEDIA_VISUAL_USER_SELECTED`) with an inline banner to expand media selection anytime, plus automatic `ContentObserver` deck refresh.
+- **Studio, Streaks & In-App Auto-Update**
+  - Tracks total space reclaimed, kept vs. deleted counts, keep ratio, daily cleanup **Streaks**, and **Weekly Storage Goals** via DataStore Preferences.
+  - Space-saving **Month / Album** two-tab square grid browser, Darkroom / Light studio theme toggle, kept-history reset, and sample photo seeder.
+  - **In-App Auto-Updater**: Checks GitHub Releases (manually or on launch), downloads the release APK with live progress tracking, and launches Android's package installer directly inside the app.
 - **Adaptive Edge-to-Edge UI**
   - Automatically switches between a bottom `NavigationBar` on phones and a `NavigationRail` on tablets/foldables.
 
@@ -50,8 +54,9 @@
 | **UI Toolkit** | Jetpack Compose, Material Design 3, Canvas |
 | **Architecture** | MVVM (`AndroidViewModel` + `StateFlow`), Repository Pattern |
 | **Navigation** | Jetpack Navigation Compose |
-| **Imaging & EXIF** | Coil Compose, Android `ExifInterface`, `MediaStore` |
+| **Imaging & Video** | Coil Compose, `MediaMetadataRetriever`, `ExifInterface`, `MediaStore` |
 | **Persistence** | Jetpack DataStore Preferences |
+| **Updates** | GitHub Releases API + `FileProvider` In-App APK Installer |
 | **Typography** | Space Grotesk & Plus Jakarta Sans (bundled locally) |
 | **Testing** | JUnit 4, Robolectric, Compose UI Test |
 
@@ -59,7 +64,7 @@
 
 ## Privacy
 
-SweepGallery runs **100% on-device**. Photos are queried directly from local `MediaStore` storage and are never uploaded, tracked, or shared externally. Network access (`INTERNET`) is used solely to check GitHub Releases for newer app versions.
+SweepGallery runs **100% on-device**. Photos and videos are queried directly from local `MediaStore` storage and are never uploaded, tracked, or shared externally. Network access (`INTERNET`) is used solely to check GitHub Releases and download app updates when requested.
 
 ---
 
@@ -84,10 +89,10 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## Automated Releases (CI/CD)
 
-`.github/workflows/release-apk.yml` runs unit tests on pushes to `main`/`master`, `v*` tags, or manual workflow dispatch, and only publishes signed release APKs (`app-release.apk`) when signing secrets are configured (debug APKs are never published to Releases):
+`.github/workflows/release-apk.yml` runs unit & Robolectric tests on pushes to `main`/`master`, `v*` tags, or manual workflow dispatch, and publishes signed release APKs (`SweepGallery-<tag>.apk`) when signing secrets are configured (debug APKs are never published to Releases):
 
 - Runs `gradle :app:testDebugUnitTest` on every push.
-- When `RELEASE_KEYSTORE_BASE64`, `STORE_PASSWORD`, and `KEY_PASSWORD` secrets are set, builds `app-release.apk`, uploads `SweepGallery-Release-APK`, and publishes it to **GitHub Releases**.
+- When `RELEASE_KEYSTORE_BASE64`, `STORE_PASSWORD`, and `KEY_PASSWORD` secrets are set, builds `app-release.apk`, uploads `SweepGallery-Release-APK`, and publishes `SweepGallery-<tag>.apk` to **GitHub Releases**.
 
 ---
 

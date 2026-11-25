@@ -79,7 +79,10 @@ jobs:
               echo "Expected release APK not found at $APK_PATH"
               exit 1
             fi
-            echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+            TAG_NAME="${{ steps.release_tag.outputs.tag }}"
+            RELEASE_APK="app/build/outputs/apk/release/SweepGallery-${TAG_NAME}.apk"
+            cp "$APK_PATH" "$RELEASE_APK"
+            echo "apk_path=$RELEASE_APK" >> "$GITHUB_OUTPUT"
             echo "release_ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "release_ready=false" >> "$GITHUB_OUTPUT"
