@@ -22,8 +22,8 @@ android {
     applicationId = "com.aistudio.tindphoto.krmxvp"
     minSdk = 24
     targetSdk = 36
-    versionCode = ciVersionCode ?: 2
-    versionName = ciVersionName ?: "1.1.0"
+    versionCode = ciVersionCode ?: 3
+    versionName = ciVersionName ?: "1.2.0"
 
     buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
 
